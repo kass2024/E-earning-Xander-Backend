@@ -1,0 +1,17 @@
+<IfModule mod_rewrite.c>
+    Options +FollowSymLinks -Indexes
+    RewriteEngine On
+
+    # cPanel / LiteSpeed — document root is the Laravel project root (not public/)
+    RewriteBase /
+
+    # Pass Authorization header to PHP
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+    # Do not rewrite requests already under /public/
+    RewriteCond %{REQUEST_URI} !^/public/
+
+    # Send everything else to Laravel front controller
+    RewriteRule ^ public/index.php [L,QSA]
+</IfModule>
