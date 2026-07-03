@@ -78,15 +78,12 @@ class ZoomMeetingBrandingResolver
         ?User $actorUser,
     ): array {
         $isMainPlatformHost = $actorUser && PlatformInstitutionHelper::isMainPlatformAdmin($actorUser);
-        $isConfiguredZoomHost = $this->isConfiguredZoomHostActor($zoomHostContext, $branding['host']['email'] ?? null);
+        $actorEmail = $actorUser?->email;
+        $isConfiguredZoomHost = $this->isConfiguredZoomHostActor($zoomHostContext, $actorEmail);
+        $useInstitutionBranding = (bool) ($branding['use_institution_logo'] ?? false);
 
-        if ($isMainPlatformHost || $isConfiguredZoomHost || !($branding['use_institution_logo'] ?? false)) {
+        if ($isMainPlatformHost || $isConfiguredZoomHost || !$useInstitutionBranding) {
             unset($branding['use_institution_logo']);
-            $branding['host']['avatar_url'] = $zoomHostContext['avatar_url'] ?? null;
-            $branding['host']['name'] = $zoomHostContext['name'] ?? $branding['host']['name'];
-        } elseif ($branding['use_institution_logo'] ?? false) {
-            $branding['host']['avatar_url'] = $branding['host']['avatar_url'] ?? null;
-        } else {
             $branding['host']['avatar_url'] = $zoomHostContext['avatar_url'] ?? null;
             $branding['host']['name'] = $zoomHostContext['name'] ?? $branding['host']['name'];
         }

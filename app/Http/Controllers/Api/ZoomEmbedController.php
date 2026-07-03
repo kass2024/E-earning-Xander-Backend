@@ -125,6 +125,13 @@ class ZoomEmbedController extends Controller
             $actorUser,
         );
 
+        if ($role === 1 && ($branding['use_institution_logo'] ?? false)) {
+            $institutionName = trim((string) ($branding['institution']['name'] ?? $branding['host']['name'] ?? ''));
+            if ($institutionName !== '') {
+                $payload['user_name'] = $institutionName;
+            }
+        }
+
         if ($role === 1) {
             $response = ['sdk' => $payload];
             $response = array_merge($response, $branding);
@@ -206,10 +213,7 @@ class ZoomEmbedController extends Controller
             }
 
             $zoomHost = $this->zoomService->resolveConfiguredHostBranding();
-            $userName = trim((string) ($zoomHost['name'] ?? ''));
-            if ($userName === '') {
-                $userName = trim((string) ($instructor->name ?? '')) ?: 'Instructor';
-            }
+            $userName = trim((string) ($instructor->name ?? '')) ?: 'Instructor';
             $participantAvatar = !empty($instructor->avatar) ? (string) $instructor->avatar : null;
             $joinUserEmail = $email !== '' ? $email : null;
         } else {

@@ -573,6 +573,12 @@ class LiveZoomCohortController extends Controller
             );
 
             $hostName = trim((string) ($branding['host']['name'] ?? $hostContext['name']));
+            if ($branding['use_institution_logo'] ?? false) {
+                $institutionName = trim((string) ($branding['institution']['name'] ?? ''));
+                if ($institutionName !== '') {
+                    $hostName = $institutionName;
+                }
+            }
 
             // Embedded Meeting SDK: same-account host uses role=1 JWT signature (no ZAK).
             $payload = $this->meetingSdkService->buildJoinPayload(
