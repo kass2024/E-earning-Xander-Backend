@@ -871,6 +871,35 @@ class InstructorDashboardController extends Controller
         ], 200);
     }
 
+    public function deleteCourse(Request $request, Course $course)
+    {
+        $data = $request->validate([
+            'instructor_email' => 'required|email',
+        ]);
+
+        $instructor = $this->findInstructor($data['instructor_email']);
+        if (!$instructor) {
+            return response()->json(['message' => 'Instructor not found'], 404);
+        }
+
+        if (!$instructor->assignedCourses()->where('courses.id', $course->id)->exists()) {
+            return response()->json(['message' => 'You are not assigned to this course.'], 403);
+        }
+
+        if ($course->enrollments()->exists()) {
+            return response()->json([
+                'message' => 'This course has enrolled learners and cannot be deleted. Contact an administrator.',
+            ], 422);
+        }
+
+        $instructor->assignedCourses()->detach($course->id);
+        $course->delete();
+
+        \App\Support\ApiListCache::bump('courses');
+
+        return response()->json(['message' => 'Course deleted.'], 200);
+    }
+
     public function payoutPaymentOptions()
     {
         $options = collect(InstructorPayoutMethods::options())

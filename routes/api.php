@@ -54,6 +54,8 @@ Route::prefix('admin')->group(function () {
     Route::post('auth/register-student', [AuthController::class, 'registerStudent']);
     Route::post('auth/register-instructor', [AuthController::class, 'registerInstructor']);
     Route::get('institution-signup/config', [InstitutionSignupController::class, 'config']);
+    Route::get('institution-signup/by-slug/{slug}', [InstitutionSignupController::class, 'bySlug']);
+    Route::get('institution-signup/portal/{slug}', [InstitutionSignupController::class, 'portal']);
     Route::get('institution-signup/choices', [InstitutionSignupController::class, 'choices']);
     Route::post('institution-signup/validate-promo', [InstitutionSignupController::class, 'validatePromo']);
     Route::post('institution-signup/register', [InstitutionSignupController::class, 'register']);
@@ -245,6 +247,7 @@ Route::prefix('admin')->group(function () {
     Route::post('learner/quizzes/{quiz}/submit', [QuizController::class, 'submit']);
     Route::post('instructor/courses', [InstructorDashboardController::class, 'createCourse']);
     Route::put('instructor/courses/{course}', [InstructorDashboardController::class, 'updateCourse']);
+    Route::delete('instructor/courses/{course}', [InstructorDashboardController::class, 'deleteCourse']);
     Route::get('instructor/payout-payment-options', [InstructorDashboardController::class, 'payoutPaymentOptions']);
     Route::get('instructor/payout-requests', [InstructorDashboardController::class, 'payoutRequests']);
     Route::post('instructor/payout-requests', [InstructorDashboardController::class, 'requestPayout']);

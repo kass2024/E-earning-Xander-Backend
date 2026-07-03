@@ -240,6 +240,14 @@ class PlatformInstitutionController extends Controller
             'website' => 'nullable|url|max:255',
             'address' => 'nullable|string|max:1000',
             'logo' => 'nullable|file|mimes:png,jpg,jpeg,gif,webp|max:5120',
+            'portal_tagline' => 'nullable|string|max:255',
+            'portal_hero_title' => 'nullable|string|max:255',
+            'portal_hero_subtitle' => 'nullable|string|max:2000',
+            'portal_about' => 'nullable|string|max:5000',
+            'portal_primary_color' => 'nullable|string|max:16',
+            'portal_cta_label' => 'nullable|string|max:120',
+            'portal_features' => 'nullable|json',
+            'portal_hero_image' => 'nullable|file|mimes:png,jpg,jpeg,gif,webp|max:8192',
         ]);
 
         $user = User::whereRaw('LOWER(email) = ?', [strtolower($data['email'])])->first();
@@ -266,6 +274,37 @@ class PlatformInstitutionController extends Controller
         }
         if (array_key_exists('address', $data)) {
             $institution->address = $data['address'];
+        }
+
+        foreach ([
+            'portal_tagline',
+            'portal_hero_title',
+            'portal_hero_subtitle',
+            'portal_about',
+            'portal_primary_color',
+            'portal_cta_label',
+        ] as $portalField) {
+            if (array_key_exists($portalField, $data)) {
+                $institution->{$portalField} = $data[$portalField];
+            }
+        }
+
+        if ($request->has('portal_features')) {
+            $raw = $request->input('portal_features');
+            $decoded = is_string($raw) ? json_decode($raw, true) : $raw;
+            if (is_array($decoded)) {
+                $institution->portal_features = array_values(array_map(static function ($item) {
+                    return [
+                        'title' => (string) ($item['title'] ?? ''),
+                        'description' => (string) ($item['description'] ?? ''),
+                    ];
+                }, $decoded));
+            }
+        }
+
+        if ($request->hasFile('portal_hero_image')) {
+            $path = $request->file('portal_hero_image')->store('uploads', 'public');
+            $institution->portal_hero_image_path = $path;
         }
 
         $institution->save();

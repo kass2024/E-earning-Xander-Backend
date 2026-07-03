@@ -266,10 +266,13 @@ class AuthController extends Controller
         $data = $request->validate([
             'username' => 'required|string',
             'password' => 'required|string',
+            'platform_institution_id' => 'nullable|integer|exists:platform_institutions,id',
+            'institution_slug' => 'nullable|string|max:255',
         ]);
 
         $username = PlatformUserService::normalizeEmail($data['username']);
         $password = $data['password'];
+        $portalInstitutionId = $this->resolvePortalInstitutionId($data);
 
         $defaultPassword = '12345678';
 
@@ -311,6 +314,10 @@ class AuthController extends Controller
                 return response()->json([
                     'message' => 'Your institution account is not active. Please contact your institution administrator.',
                 ], 403);
+            }
+
+            if ($reject = $this->rejectIfWrongInstitutionPortal($portalInstitutionId, $institution)) {
+                return $reject;
             }
 
             return response()->json([
@@ -372,6 +379,10 @@ class AuthController extends Controller
                 return response()->json([
                     'message' => 'Your institution account is not active. Please contact support.',
                 ], 403);
+            }
+
+            if ($reject = $this->rejectIfWrongInstitutionPortal($portalInstitutionId, $institution)) {
+                return $reject;
             }
 
             return response()->json([
@@ -514,5 +525,46 @@ class AuthController extends Controller
         return response()->json([
             'message' => 'Google login callback not yet fully configured on the server.',
         ], 501);
+    }
+
+    /**
+     * Resolve expected institution for a branded institution login portal.
+     */
+    private function resolvePortalInstitutionId(array $data): ?int
+    {
+        if (!empty($data['institution_slug'])) {
+            $slug = strtolower(trim((string) $data['institution_slug']));
+            $institution = PlatformInstitution::query()
+                ->whereRaw('LOWER(slug) = ?', [$slug])
+                ->where('status', 'active')
+                ->first();
+
+            return $institution?->id;
+        }
+
+        if (!empty($data['platform_institution_id'])) {
+            return (int) $data['platform_institution_id'];
+        }
+
+        return null;
+    }
+
+    /**
+     * When logging in via an institution-specific URL, reject accounts from other institutions.
+     */
+    private function rejectIfWrongInstitutionPortal(?int $expectedInstitutionId, ?PlatformInstitution $userInstitution): ?JsonResponse
+    {
+        if ($expectedInstitutionId === null) {
+            return null;
+        }
+
+        $userInstitutionId = $userInstitution?->id;
+        if ((int) $userInstitutionId !== (int) $expectedInstitutionId) {
+            return response()->json([
+                'message' => 'This account does not belong to this institution. Use the correct institution login link or contact your administrator.',
+            ], 403);
+        }
+
+        return null;
     }
 }

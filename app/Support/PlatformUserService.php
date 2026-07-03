@@ -22,24 +22,23 @@ class PlatformUserService
 
     public static function adminEmail(): string
     {
-        $fromEnv = trim((string) env('PLATFORM_ADMIN_EMAIL', ''));
+        $fromConfig = trim((string) config('platform.admin_email', ''));
 
-        return $fromEnv !== ''
-            ? strtolower($fromEnv)
+        return $fromConfig !== ''
+            ? strtolower($fromConfig)
             : self::DEFAULT_ADMIN_EMAIL;
     }
 
     public static function adminDisplayName(): string
     {
-        $fromEnv = trim((string) env('PLATFORM_ADMIN_NAME', ''));
+        $fromConfig = trim((string) config('platform.admin_name', ''));
 
-        return $fromEnv !== '' ? $fromEnv : 'Xander Global Scholars Admin';
+        return $fromConfig !== '' ? $fromConfig : 'Xander Global Scholars Admin';
     }
 
     public static function seedPassword(): string
     {
-        $fromEnv = env('SEED_PLATFORM_PASSWORD', '');
-        $plain = trim((string) $fromEnv, " \t\n\r\0\x0B'\"");
+        $plain = trim((string) config('platform.seed_password', ''), " \t\n\r\0\x0B'\"");
 
         return $plain !== '' ? $plain : 'admin123';
     }

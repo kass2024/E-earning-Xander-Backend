@@ -16,6 +16,8 @@ class PlatformInstitution extends Model
         'approved_at', 'approved_by', 'admin_notes',
         'mail_use_custom', 'mail_host', 'mail_port', 'mail_username', 'mail_password',
         'mail_encryption', 'mail_from_address', 'mail_from_name', 'mail_ehlo_domain',
+        'portal_tagline', 'portal_hero_title', 'portal_hero_subtitle', 'portal_about',
+        'portal_primary_color', 'portal_features', 'portal_hero_image_path', 'portal_cta_label',
     ];
 
     protected $hidden = [
@@ -27,6 +29,7 @@ class PlatformInstitution extends Model
         return [
             'approved_at' => 'datetime',
             'mail_use_custom' => 'boolean',
+            'portal_features' => 'array',
         ];
     }
 
@@ -59,6 +62,73 @@ class PlatformInstitution extends Model
         return PublicStorageUrl::normalize($value);
     }
 
+    public function portalHeroImageUrl(): ?string
+    {
+        if (!empty($this->portal_hero_image_path)) {
+            return PublicStorageUrl::fromPath($this->portal_hero_image_path);
+        }
+
+        return null;
+    }
+
+    /** @return list<array{title: string, description: string}> */
+    public function defaultPortalFeatures(): array
+    {
+        return [
+            [
+                'title' => 'Expert-led programs',
+                'description' => 'Structured learning paths designed for real-world skills and career growth.',
+            ],
+            [
+                'title' => 'Live online classes',
+                'description' => 'Join interactive sessions with experienced instructors from anywhere.',
+            ],
+            [
+                'title' => 'Track your progress',
+                'description' => 'A personal dashboard for courses, quizzes, live classes, and certificates.',
+            ],
+        ];
+    }
+
+    public function portalContentPayload(): array
+    {
+        $name = (string) $this->name;
+        $about = trim((string) ($this->portal_about ?? ''));
+
+        if ($about === '') {
+            $parts = ["{$name} is a partner institution on our learning platform."];
+            if (!empty($this->address)) {
+                $parts[] = 'Located at ' . trim((string) $this->address) . '.';
+            }
+            if (!empty($this->website)) {
+                $parts[] = 'Visit us online for more information.';
+            }
+            $about = implode(' ', $parts);
+        }
+
+        $features = $this->portal_features;
+        if (!is_array($features) || count($features) === 0) {
+            $features = $this->defaultPortalFeatures();
+        }
+
+        return [
+            'tagline' => trim((string) ($this->portal_tagline ?? '')) ?: "Study. Learn. Succeed with {$name}.",
+            'hero_title' => trim((string) ($this->portal_hero_title ?? '')) ?: "Welcome to {$name}",
+            'hero_subtitle' => trim((string) ($this->portal_hero_subtitle ?? ''))
+                ?: 'Explore programs, live classes, and expert-led training built for your success.',
+            'about' => $about,
+            'primary_color' => $this->portal_primary_color ?: null,
+            'features' => array_values(array_map(static function ($item) {
+                return [
+                    'title' => (string) ($item['title'] ?? ''),
+                    'description' => (string) ($item['description'] ?? ''),
+                ];
+            }, $features)),
+            'hero_image_url' => $this->portalHeroImageUrl(),
+            'cta_label' => trim((string) ($this->portal_cta_label ?? '')) ?: 'Start enrollment',
+        ];
+    }
+
     public function toPublicArray(): array
     {
         return [
@@ -77,6 +147,7 @@ class PlatformInstitution extends Model
             'mail_use_custom' => (bool) $this->mail_use_custom,
             'mail_from_address' => $this->mail_from_address,
             'mail_from_name' => $this->mail_from_name,
+            'portal' => $this->portalContentPayload(),
         ];
     }
 

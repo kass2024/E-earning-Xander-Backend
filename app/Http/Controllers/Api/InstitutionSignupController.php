@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\ElearningProgram;
 use App\Models\InstitutionPromoCode;
 use App\Models\PlatformInstitution;
 use App\Services\InstitutionSignupService;
@@ -19,6 +20,75 @@ class InstitutionSignupController extends Controller
             'signup_fee_cents' => $this->signupService->signupFeeCents(),
             'currency' => config('institution.signup_currency', 'usd'),
             'product_name' => config('institution.signup_product_name'),
+        ]);
+    }
+
+    /** Resolve a partner institution for private learner signup links (/join/{slug}). */
+    public function bySlug(string $slug)
+    {
+        if (!Schema::hasTable('platform_institutions')) {
+            return response()->json(['message' => 'Institution not found'], 404);
+        }
+
+        $normalized = strtolower(trim($slug));
+        if ($normalized === '') {
+            return response()->json(['message' => 'Institution not found'], 404);
+        }
+
+        $institution = PlatformInstitution::query()
+            ->whereRaw('LOWER(slug) = ?', [$normalized])
+            ->where('status', 'active')
+            ->first();
+
+        if (!$institution) {
+            return response()->json(['message' => 'Institution not found or not accepting registrations'], 404);
+        }
+
+        return response()->json(['institution' => $institution->toPublicArray()]);
+    }
+
+    /** Full auto-generated institution portal (website) payload for /i/{slug}. */
+    public function portal(string $slug)
+    {
+        if (!Schema::hasTable('platform_institutions')) {
+            return response()->json(['message' => 'Institution not found'], 404);
+        }
+
+        $normalized = strtolower(trim($slug));
+        if ($normalized === '') {
+            return response()->json(['message' => 'Institution not found'], 404);
+        }
+
+        $institution = PlatformInstitution::query()
+            ->whereRaw('LOWER(slug) = ?', [$normalized])
+            ->where('status', 'active')
+            ->first();
+
+        if (!$institution) {
+            return response()->json(['message' => 'Institution not found or not available'], 404);
+        }
+
+        $programs = ElearningProgram::query()
+            ->where('platform_institution_id', $institution->id)
+            ->where('status', 'Active')
+            ->with(['courses' => function ($q) use ($institution) {
+                $q->where('platform_institution_id', $institution->id)
+                    ->where('status', 'Active')
+                    ->orderBy('title');
+            }])
+            ->orderBy('sort_order')
+            ->orderBy('name')
+            ->get();
+
+        $courseCount = $programs->sum(static fn (ElearningProgram $program) => $program->courses->count());
+
+        return response()->json([
+            'institution' => $institution->toPublicArray(),
+            'programs' => $programs,
+            'stats' => [
+                'programs_count' => $programs->count(),
+                'courses_count' => $courseCount,
+            ],
         ]);
     }
 

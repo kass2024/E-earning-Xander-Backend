@@ -64,6 +64,46 @@ class PlatformTenantScope
 
 
 
+        $explicit = $request->input('platform_institution_id') ?? $request->query('platform_institution_id');
+
+        if ($explicit !== null && $explicit !== '') {
+
+            $email = self::resolveActorEmail($request);
+
+            if ($email === '') {
+
+                return (int) $explicit;
+
+            }
+
+
+
+            $user = User::query()
+
+                ->whereRaw('LOWER(email) = ?', [$email])
+
+                ->first();
+
+
+
+            if (!$user) {
+
+                return (int) $explicit;
+
+            }
+
+
+
+            if (PlatformInstitutionHelper::isMainPlatformAdmin($user)) {
+
+                return (int) $explicit;
+
+            }
+
+        }
+
+
+
         $email = self::resolveActorEmail($request);
 
         if ($email === '') {
@@ -91,16 +131,6 @@ class PlatformTenantScope
 
 
         if (PlatformInstitutionHelper::isMainPlatformAdmin($user)) {
-
-            $explicit = $request->input('platform_institution_id') ?? $request->query('platform_institution_id');
-
-            if ($explicit !== null && $explicit !== '') {
-
-                return (int) $explicit;
-
-            }
-
-
 
             return null;
 
