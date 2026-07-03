@@ -5,8 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\Course;
-use App\Models\User;
 use App\Models\CourseEnrollment;
+use App\Models\User;
 use App\Models\Student;
 use App\Models\CourseMaterial;
 use App\Models\StudyShift;
@@ -96,6 +96,9 @@ class CourseController extends Controller
             'status' => 'nullable|string|max:50',
             'image' => 'nullable',
         ], CourseDetailsHelper::validationRules()));
+
+        $program = \App\Models\ElearningProgram::query()->findOrFail($data['program_id']);
+        PlatformTenantScope::assertCanAccess($request, $program);
 
         $details = CourseDetailsHelper::extractFromRequest($request);
 

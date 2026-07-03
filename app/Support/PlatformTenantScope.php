@@ -269,17 +269,16 @@ class PlatformTenantScope
 
 
     public static function stampInstitutionId(Request $request, array &$data, string $key = 'platform_institution_id'): void
-
     {
-
-        $tenantId = self::resolvePartnerTenantId($request);
-
-        if ($tenantId !== null) {
-
-            $data[$key] = $tenantId;
-
+        if (!empty($data[$key])) {
+            return;
         }
 
+        $tenantId = self::resolvePartnerTenantId($request) ?? self::resolveTenantId($request);
+
+        if ($tenantId !== null) {
+            $data[$key] = $tenantId;
+        }
     }
 
 

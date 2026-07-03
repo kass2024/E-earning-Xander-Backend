@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Course;
 use App\Models\ElearningProgram;
 use App\Support\ApiListCache;
 use App\Support\PlatformTenantScope;
@@ -153,6 +154,23 @@ class ElearningProgramController extends Controller
             'course_ids.*' => 'integer|exists:courses,id',
         ]);
 
+        $tenantId = PlatformTenantScope::resolveTenantId($request);
+        if ($tenantId !== null) {
+            $foreignCount = Course::query()
+                ->whereIn('id', $data['course_ids'])
+                ->where(function ($q) use ($tenantId) {
+                    $q->whereNull('platform_institution_id')
+                        ->orWhere('platform_institution_id', '!=', $tenantId);
+                })
+                ->count();
+
+            if ($foreignCount > 0) {
+                return response()->json([
+                    'message' => 'One or more courses belong to another institution.',
+                ], 422);
+            }
+        }
+
         $result = $assignment->assignCoursesToProgram($elearningProgram->id, $data['course_ids']);
         $elearningProgram->load(['courses' => fn ($q) => $q->orderBy('title')]);
 
@@ -165,6 +183,12 @@ class ElearningProgramController extends Controller
 
     public function autoAssignCourses(Request $request, CourseProgramAssignmentService $assignment)
     {
+        if (PlatformTenantScope::resolveTenantId($request) !== null) {
+            return response()->json([
+                'message' => 'Auto-assign is only available to the main platform administrator.',
+            ], 403);
+        }
+
         $data = $request->validate([
             'create_missing' => 'nullable|boolean',
             'force' => 'nullable|boolean',
