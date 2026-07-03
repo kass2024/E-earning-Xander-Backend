@@ -18,6 +18,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withSchedule(function (Schedule $schedule): void {
         $schedule->command('meeting-registrations:send-reminders')->everyMinute();
         $schedule->command('admin-zoom-meetings:send-reminders')->everyMinute();
+        $schedule->command('quizzes:send-scheduled-reminders')->everyMinute();
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

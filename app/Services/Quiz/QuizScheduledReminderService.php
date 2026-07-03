@@ -11,41 +11,60 @@ use App\Support\EnrollmentStatusHelper;
 use App\Support\QuizMaterialHelper;
 use Illuminate\Support\Facades\Log;
 
-class QuizPublishedNotificationService
+class QuizScheduledReminderService
 {
+    public const REMINDER_MINUTES_BEFORE = 90;
+
     public function __construct(
         protected MailDeliveryService $mail,
     ) {
     }
 
     /**
-     * @param  array<int, int>  $publishedStudentIds  Empty = all enrolled learners
+     * Send 90-minute reminder emails for a scheduled quiz (idempotent per quiz).
+     *
+     * @return int Number of emails sent
      */
-    public function notify(CourseMaterial $quiz, array $publishedStudentIds = []): int
+    public function sendDueReminders(CourseMaterial $quiz): int
     {
-        if (!QuizMaterialHelper::isPublished($quiz)) {
+        if (!in_array($quiz->type, ['quiz', 'assessment'], true)) {
             return 0;
         }
 
-        if (QuizMaterialHelper::isScheduledQuiz($quiz) && !QuizMaterialHelper::isOpenForAccess($quiz)) {
+        if (!QuizMaterialHelper::isPublished($quiz) || !QuizMaterialHelper::isScheduledQuiz($quiz)) {
+            return 0;
+        }
+
+        $opensAt = QuizMaterialHelper::scheduledOpensAt($quiz);
+        if ($opensAt === null || now()->gte($opensAt)) {
+            return 0;
+        }
+
+        $meta = QuizMaterialHelper::meta($quiz);
+        if (!empty($meta['reminder_90m_sent_at'])) {
+            return 0;
+        }
+
+        $remindFrom = $opensAt->copy()->subMinutes(self::REMINDER_MINUTES_BEFORE);
+        if (now()->lt($remindFrom)) {
             return 0;
         }
 
         $quiz->loadMissing('course');
         $course = $quiz->course;
-        if (!$course) {
+        if (!$course instanceof Course) {
             return 0;
         }
 
+        $publishedStudentIds = QuizMaterialHelper::publishedStudentIds($quiz);
         $students = $this->resolveStudents($course, $publishedStudentIds);
         if ($students->isEmpty()) {
             return 0;
         }
 
-        $meta = QuizMaterialHelper::meta($quiz);
         $kind = (string) ($meta['assessment_kind'] ?? 'quiz');
         $kindLabel = match ($kind) {
-            'exam' => 'Exam',
+            'exam' => 'Final exam',
             'test' => 'Test',
             default => 'Quiz',
         };
@@ -55,6 +74,8 @@ class QuizPublishedNotificationService
             ? $frontend . '/dashboard/learner/quiz/' . $quiz->id
             : null;
 
+        $opensAtLabel = $opensAt->timezone(config('app.timezone', 'UTC'))->format('l, M j, Y g:i A T');
+
         $sent = 0;
         foreach ($students as $student) {
             $email = trim((string) ($student->email ?? ''));
@@ -63,21 +84,22 @@ class QuizPublishedNotificationService
             }
 
             $ok = $this->mail->sendView(
-                'emails.quiz_published',
+                'emails.quiz_scheduled_reminder',
                 [
                     'student' => $student,
                     'course' => $course,
                     'quiz' => $quiz,
                     'kindLabel' => $kindLabel,
                     'takeUrl' => $takeUrl,
+                    'opensAtLabel' => $opensAtLabel,
                     'timeLimit' => QuizMaterialHelper::timeLimitMinutes($quiz),
                     'passingScore' => (int) ($meta['passing_score'] ?? 70),
                 ],
                 function ($message) use ($email, $quiz, $kindLabel) {
                     $message->to($email)
-                        ->subject($kindLabel . ' published: ' . ($quiz->title ?? 'Assessment'));
+                        ->subject($kindLabel . ' reminder: ' . ($quiz->title ?? 'Assessment') . ' starts in 1h 30m');
                 },
-                ['quiz_id' => $quiz->id, 'student_id' => $student->id]
+                ['quiz_id' => $quiz->id, 'student_id' => $student->id, 'reminder' => '90m']
             );
 
             if ($ok) {
@@ -85,11 +107,17 @@ class QuizPublishedNotificationService
             }
         }
 
-        Log::info('Quiz publish notifications sent', [
-            'quiz_id' => $quiz->id,
-            'sent' => $sent,
-            'targets' => $students->count(),
-        ]);
+        if ($sent > 0 || $students->isNotEmpty()) {
+            $meta['reminder_90m_sent_at'] = now()->toIso8601String();
+            $quiz->metadata = $meta;
+            $quiz->save();
+
+            Log::info('Quiz scheduled reminder emails sent', [
+                'quiz_id' => $quiz->id,
+                'sent' => $sent,
+                'targets' => $students->count(),
+            ]);
+        }
 
         return $sent;
     }

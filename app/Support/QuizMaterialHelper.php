@@ -280,6 +280,53 @@ class QuizMaterialHelper
         return in_array($studentId, $allowed, true);
     }
 
+    public static function availabilityMode(CourseMaterial $quiz): string
+    {
+        $meta = self::meta($quiz);
+        $mode = strtolower(trim((string) ($meta['availability_mode'] ?? '')));
+
+        if ($mode === 'scheduled' || self::scheduledOpensAt($quiz) !== null) {
+            return 'scheduled';
+        }
+
+        return 'immediate';
+    }
+
+    /** When the quiz becomes available to learners (null = immediate on publish). */
+    public static function scheduledOpensAt(CourseMaterial $quiz): ?\Carbon\Carbon
+    {
+        if (!$quiz->scheduled_at) {
+            return null;
+        }
+
+        try {
+            return \Carbon\Carbon::parse($quiz->scheduled_at);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    public static function isScheduledQuiz(CourseMaterial $quiz): bool
+    {
+        return self::availabilityMode($quiz) === 'scheduled' && self::scheduledOpensAt($quiz) !== null;
+    }
+
+    public static function isOpenForAccess(CourseMaterial $quiz): bool
+    {
+        $opensAt = self::scheduledOpensAt($quiz);
+        if ($opensAt === null) {
+            return true;
+        }
+
+        return now()->greaterThanOrEqualTo($opensAt);
+    }
+
+    /** Published, targeted, and past scheduled open time (if any). */
+    public static function isAccessibleToStudent(CourseMaterial $quiz, int $studentId): bool
+    {
+        return self::isVisibleToStudent($quiz, $studentId) && self::isOpenForAccess($quiz);
+    }
+
     public static function hasInteractiveQuestions(CourseMaterial $quiz): bool
     {
         $meta = self::meta($quiz);

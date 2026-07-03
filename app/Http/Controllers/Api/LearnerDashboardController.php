@@ -713,9 +713,6 @@ class LearnerDashboardController extends Controller
         foreach ($recentQuizzes as $material) {
             $meta = QuizMaterialHelper::meta($material);
             $publishedAt = $meta['published_at'] ?? $material->updated_at?->toIso8601String();
-            if ($publishedAt && \Carbon\Carbon::parse($publishedAt)->lt(now()->subDays(30))) {
-                continue;
-            }
 
             $kind = (string) ($meta['assessment_kind'] ?? 'quiz');
             $kindLabel = match ($kind) {
@@ -723,6 +720,27 @@ class LearnerDashboardController extends Controller
                 'test' => 'Test',
                 default => 'Quiz',
             };
+
+            if (QuizMaterialHelper::isScheduledQuiz($material) && !QuizMaterialHelper::isOpenForAccess($material)) {
+                $opensAt = QuizMaterialHelper::scheduledOpensAt($material);
+                $notifications[] = [
+                    'id' => 'assessment-scheduled-' . $material->id,
+                    'type' => 'assessment_scheduled',
+                    'title' => $kindLabel . ' scheduled',
+                    'message' => ($material->course?->title ?? 'Your course') . ': ' . ($material->title ?? 'Assessment'),
+                    'created_at' => $publishedAt,
+                    'opens_at' => $opensAt?->toIso8601String(),
+                    'course_id' => $material->course_id,
+                    'material_id' => $material->id,
+                    'quiz_id' => $material->id,
+                    'action_path' => '/dashboard/learner/quiz/' . $material->id,
+                ];
+                continue;
+            }
+
+            if ($publishedAt && \Carbon\Carbon::parse($publishedAt)->lt(now()->subDays(30))) {
+                continue;
+            }
 
             $notifications[] = [
                 'id' => 'assessment-' . $material->id,

@@ -320,16 +320,19 @@ class QuizController extends Controller
             'type' => 'quiz',
             'resource_url' => null,
             'metadata' => $metadata,
+            'scheduled_at' => $this->resolveQuizScheduledAt($data, $status),
             'sort_order' => 0,
         ]);
 
         $notified = 0;
-        if ($status === 'published') {
+        if ($status === 'published' && $this->shouldNotifyOnPublish($quiz)) {
             $notified = $this->publishNotifications->notify($quiz->load('course'), $publishedStudentIds);
         }
 
         $message = $status === 'published'
-            ? 'Quiz published. Selected learners can now take it.'
+            ? ($this->isScheduledPublish($quiz)
+                ? 'Assessment scheduled. Learners will be notified 1 hour 30 minutes before it opens.'
+                : 'Quiz published. Selected learners can now take it.')
             : 'Quiz saved as draft. Publish when you are ready.';
 
         return response()->json([
@@ -406,18 +409,29 @@ class QuizController extends Controller
 
         $metadata = $this->buildQuizMetadata($data, $status, $publishedStudentIds, $existingMeta);
 
+        $previousScheduledAt = $quiz->scheduled_at?->toIso8601String();
         $quiz->title = $data['title'];
         $quiz->description = $data['description'] ?? ('Topic: ' . $data['topic']);
         $quiz->metadata = $metadata;
+        $quiz->scheduled_at = $this->resolveQuizScheduledAt($data, $status, $quiz);
+        if ($quiz->scheduled_at?->toIso8601String() !== $previousScheduledAt) {
+            $meta = QuizMaterialHelper::meta($quiz);
+            unset($meta['reminder_90m_sent_at']);
+            $quiz->metadata = $meta;
+        }
         $quiz->save();
 
         $notified = 0;
-        if ($status === 'published' && !$wasPublished) {
+        if ($status === 'published' && !$wasPublished && $this->shouldNotifyOnPublish($quiz)) {
             $notified = $this->publishNotifications->notify($quiz->load('course'), $publishedStudentIds);
         }
 
         return response()->json([
-            'message' => $status === 'published' ? 'Quiz updated and published.' : 'Quiz updated.',
+            'message' => $status === 'published'
+                ? ($this->isScheduledPublish($quiz)
+                    ? 'Assessment scheduled. Learners will be notified 1 hour 30 minutes before it opens.'
+                    : 'Quiz updated and published.')
+                : 'Quiz updated.',
             'quiz' => $this->formatQuizRow($quiz->load('course')),
             'notifications_sent' => $notified,
         ]);
@@ -435,6 +449,8 @@ class QuizController extends Controller
             'published_student_ids.*' => 'integer|exists:students,id',
             'time_limit_minutes' => 'nullable|integer|min:1|max:240',
             'passing_score' => 'nullable|integer|min:40|max:100',
+            'availability_mode' => 'nullable|string|in:immediate,scheduled',
+            'scheduled_at' => 'nullable|date',
         ]);
 
         $instructor = User::query()
@@ -469,15 +485,33 @@ class QuizController extends Controller
             $meta['passing_score'] = (int) ($data['passing_score'] ?? 70);
         }
 
+        $meta['availability_mode'] = strtolower(trim((string) ($data['availability_mode'] ?? ($meta['availability_mode'] ?? 'immediate'))));
+        if ($meta['availability_mode'] !== 'scheduled') {
+            $meta['availability_mode'] = 'immediate';
+        }
+
+        $previousScheduledAt = $quiz->scheduled_at?->toIso8601String();
         $quiz->metadata = $meta;
+        $quiz->scheduled_at = $this->resolveQuizScheduledAt($data, 'published', $quiz);
+        if ($quiz->scheduled_at?->toIso8601String() !== $previousScheduledAt) {
+            unset($meta['reminder_90m_sent_at']);
+            $quiz->metadata = $meta;
+        }
         $quiz->save();
 
-        $notified = $this->publishNotifications->notify($quiz->load('course'), $publishedStudentIds);
+        $notified = 0;
+        if ($this->shouldNotifyOnPublish($quiz)) {
+            $notified = $this->publishNotifications->notify($quiz->load('course'), $publishedStudentIds);
+        }
+
+        $scheduled = $this->isScheduledPublish($quiz);
 
         return response()->json([
-            'message' => empty($publishedStudentIds)
-                ? 'Quiz published to all enrolled learners.'
-                : 'Quiz published to selected learners.',
+            'message' => $scheduled
+                ? 'Assessment scheduled. Learners will be notified 1 hour 30 minutes before it opens.'
+                : (empty($publishedStudentIds)
+                    ? 'Quiz published to all enrolled learners.'
+                    : 'Quiz published to selected learners.'),
             'quiz' => $this->formatQuizRow($quiz->load('course')),
             'notifications_sent' => $notified,
         ]);
@@ -511,6 +545,16 @@ class QuizController extends Controller
 
         if (!QuizMaterialHelper::isVisibleToStudent($quiz, $studentId)) {
             return response()->json(['message' => 'This quiz is not available to you yet.'], 403);
+        }
+
+        if (!QuizMaterialHelper::isOpenForAccess($quiz)) {
+            $opensAt = QuizMaterialHelper::scheduledOpensAt($quiz);
+
+            return response()->json([
+                'message' => 'This assessment opens at the scheduled time.',
+                'scheduled' => true,
+                'opens_at' => $opensAt?->toIso8601String(),
+            ], 403);
         }
 
         $meta = QuizMaterialHelper::meta($quiz);
@@ -636,7 +680,17 @@ class QuizController extends Controller
             return response()->json(['message' => 'You are not enrolled in this course.'], 403);
         }
 
-        if (!QuizMaterialHelper::isVisibleToStudent($quiz, $student->id)) {
+        if (!QuizMaterialHelper::isAccessibleToStudent($quiz, $student->id)) {
+            if (QuizMaterialHelper::isVisibleToStudent($quiz, $student->id) && !QuizMaterialHelper::isOpenForAccess($quiz)) {
+                $opensAt = QuizMaterialHelper::scheduledOpensAt($quiz);
+
+                return response()->json([
+                    'message' => 'This assessment opens at the scheduled time.',
+                    'scheduled' => true,
+                    'opens_at' => $opensAt?->toIso8601String(),
+                ], 403);
+            }
+
             return response()->json(['message' => 'This quiz is not available to you.'], 403);
         }
 
@@ -983,6 +1037,9 @@ class QuizController extends Controller
                 ? (int) $data['material_id']
                 : ($existingMeta['source_material_id'] ?? null),
             'status' => $status,
+            'availability_mode' => strtolower(trim((string) ($data['availability_mode'] ?? ($existingMeta['availability_mode'] ?? 'immediate')))) === 'scheduled'
+                ? 'scheduled'
+                : 'immediate',
             'published_student_ids' => $publishedStudentIds,
             'published_at' => $publishedAt,
             'marking' => $existingMeta['marking'] ?? [
@@ -1150,7 +1207,7 @@ class QuizController extends Controller
             return response()->json(['message' => 'You are not enrolled in this course.'], 403);
         }
 
-        if (!QuizMaterialHelper::isVisibleToStudent($quiz, $student->id)) {
+        if (!QuizMaterialHelper::isAccessibleToStudent($quiz, $student->id)) {
             return response()->json(['message' => 'This assessment is not available to you.'], 403);
         }
 
@@ -1267,6 +1324,8 @@ class QuizController extends Controller
             'anti_cheat.detect_tab_switch' => 'nullable|boolean',
             'question_pool' => 'nullable|array',
             'assessment_kind' => 'nullable|string|in:quiz,test,exam',
+            'availability_mode' => 'nullable|string|in:immediate,scheduled',
+            'scheduled_at' => 'nullable|date',
         ];
 
         if ($creating) {
@@ -1335,6 +1394,54 @@ class QuizController extends Controller
             'ai_generated' => (bool) ($meta['ai_generated'] ?? false),
             'created_at' => $m->created_at?->toIso8601String(),
             'published_at' => $meta['published_at'] ?? null,
+            'availability_mode' => QuizMaterialHelper::availabilityMode($m),
+            'scheduled_at' => QuizMaterialHelper::scheduledOpensAt($m)?->toIso8601String(),
+            'is_quiz_open' => QuizMaterialHelper::isOpenForAccess($m),
         ];
+    }
+
+    protected function shouldNotifyOnPublish(CourseMaterial $quiz): bool
+    {
+        return QuizMaterialHelper::isOpenForAccess($quiz);
+    }
+
+    protected function isScheduledPublish(CourseMaterial $quiz): bool
+    {
+        return QuizMaterialHelper::isScheduledQuiz($quiz) && !QuizMaterialHelper::isOpenForAccess($quiz);
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    protected function resolveQuizScheduledAt(array $data, string $status, ?CourseMaterial $existing = null): ?\Carbon\Carbon
+    {
+        $mode = strtolower(trim((string) ($data['availability_mode'] ?? QuizMaterialHelper::availabilityMode($existing ?? new CourseMaterial()))));
+        if ($mode !== 'scheduled') {
+            return null;
+        }
+
+        $raw = trim((string) ($data['scheduled_at'] ?? ''));
+        if ($raw === '' && $existing?->scheduled_at) {
+            return \Carbon\Carbon::parse($existing->scheduled_at);
+        }
+
+        if ($raw === '') {
+            if ($status === 'published') {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'scheduled_at' => ['Choose a date and time for the scheduled assessment.'],
+                ]);
+            }
+
+            return null;
+        }
+
+        $scheduledAt = \Carbon\Carbon::parse($raw);
+        if ($status === 'published' && $scheduledAt->lte(now())) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'scheduled_at' => ['Scheduled time must be in the future.'],
+            ]);
+        }
+
+        return $scheduledAt;
     }
 }

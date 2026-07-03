@@ -1,6 +1,10 @@
 *.log
 .DS_Store
+
+# Environment files (never commit secrets)
 .env
+.env.*
+!.env.example
 .env.backup
 .env.production
 .phpactor.json
@@ -17,7 +21,6 @@
 /public/hot
 /public/storage
 /vendor
-.env.cpanel
 Homestead.json
 Homestead.yaml
 Thumbs.db
