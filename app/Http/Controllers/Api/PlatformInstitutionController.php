@@ -77,6 +77,12 @@ class PlatformInstitutionController extends Controller
         $platformInstitution->approved_by = $request->input('approved_by');
         $platformInstitution->save();
 
+        try {
+            $this->signupService->ensureOwnerAccount($platformInstitution->fresh());
+        } catch (\Throwable $e) {
+            return response()->json(['message' => 'Institution approved but owner account could not be created: ' . $e->getMessage()], 500);
+        }
+
         if ($platformInstitution->owner_user_id) {
             $ownerStatus = $platformInstitution->payment_status === 'unpaid' ? 'Unpaid' : 'Active';
             User::where('id', $platformInstitution->owner_user_id)->update(['status' => $ownerStatus]);
@@ -123,13 +129,32 @@ class PlatformInstitutionController extends Controller
 
     public function resendCredentials(PlatformInstitution $platformInstitution)
     {
-        $platformInstitution->load('owner');
-        $result = $this->signupService->resendOwnerCredentials($platformInstitution);
+        $result = $this->signupService->resetOwnerPassword($platformInstitution->fresh(), null, true);
         if (!$result['ok']) {
             return response()->json(['message' => $result['message']], $result['status'] ?? 500);
         }
 
-        return response()->json(['message' => $result['message']]);
+        return response()->json($result);
+    }
+
+    public function resetOwnerPassword(PlatformInstitution $platformInstitution, Request $request)
+    {
+        $data = $request->validate([
+            'password' => 'nullable|string|min:8|max:128',
+            'send_email' => 'sometimes|boolean',
+        ]);
+
+        $result = $this->signupService->resetOwnerPassword(
+            $platformInstitution->fresh(),
+            $data['password'] ?? null,
+            (bool) ($data['send_email'] ?? false),
+        );
+
+        if (!$result['ok']) {
+            return response()->json(['message' => $result['message']], $result['status'] ?? 422);
+        }
+
+        return response()->json($result);
     }
 
     public function destroy(PlatformInstitution $platformInstitution)
@@ -171,7 +196,14 @@ class PlatformInstitutionController extends Controller
     {
         $platformInstitution->load(['owner:id,name,email,status', 'payments']);
 
-        return response()->json($platformInstitution->toAdminArray());
+        return response()->json(array_merge($platformInstitution->toAdminArray(), [
+            'owner' => $platformInstitution->owner ? [
+                'id' => $platformInstitution->owner->id,
+                'name' => $platformInstitution->owner->name,
+                'email' => $platformInstitution->owner->email,
+                'status' => $platformInstitution->owner->status,
+            ] : null,
+        ]));
     }
 
     public function update(PlatformInstitution $platformInstitution, Request $request)

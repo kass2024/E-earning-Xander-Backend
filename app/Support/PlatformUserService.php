@@ -73,7 +73,10 @@ class PlatformUserService
 
     public static function setUserPassword(User $user, string $plain): void
     {
-        $user->password = trim($plain);
+        $plain = trim($plain);
+        $user->password = password_get_info($plain)['algo'] !== 0
+            ? $plain
+            : Hash::make($plain);
         $user->save();
     }
 

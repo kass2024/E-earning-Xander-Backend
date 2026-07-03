@@ -332,8 +332,10 @@ class AuthController extends Controller
         // Users table (admin, staff, instructors, partners, etc.)
         try {
             $user = User::query()
-                ->whereRaw('LOWER(TRIM(email)) = ?', [$username])
-                ->orWhere('name', $username)
+                ->where(function ($query) use ($username) {
+                    $query->whereRaw('LOWER(TRIM(email)) = ?', [$username])
+                        ->orWhere('name', $username);
+                })
                 ->first();
         } catch (QueryException $e) {
             return response()->json([
@@ -374,6 +376,11 @@ class AuthController extends Controller
                     return response()->json([
                         'message' => 'Your institution account has an outstanding payment. Check your email for the Stripe payment link.',
                     ], 403);
+                }
+                if ($institution->status === 'active' && in_array($userStatus, ['pending', 'unpaid'], true)) {
+                    $user->status = 'Active';
+                    $user->save();
+                    $userStatus = 'active';
                 }
             } elseif ($institution && !PlatformInstitutionHelper::canLoginInstitution($institution)) {
                 return response()->json([

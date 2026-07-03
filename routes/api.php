@@ -261,6 +261,7 @@ Route::prefix('admin')->group(function () {
     Route::post('platform-institutions/{platformInstitution}/disable', [PlatformInstitutionController::class, 'disable']);
     Route::post('platform-institutions/{platformInstitution}/enable', [PlatformInstitutionController::class, 'enable']);
     Route::post('platform-institutions/{platformInstitution}/resend-credentials', [PlatformInstitutionController::class, 'resendCredentials']);
+    Route::post('platform-institutions/{platformInstitution}/reset-owner-password', [PlatformInstitutionController::class, 'resetOwnerPassword']);
     Route::post('platform-institutions/{platformInstitution}/payment-reminder', [PlatformInstitutionController::class, 'sendPaymentReminder']);
     Route::post('platform-institutions/{platformInstitution}/logo', [PlatformInstitutionController::class, 'uploadLogo']);
     Route::delete('platform-institutions/{platformInstitution}', [PlatformInstitutionController::class, 'destroy']);

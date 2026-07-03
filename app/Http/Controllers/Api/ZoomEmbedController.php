@@ -435,6 +435,19 @@ class ZoomEmbedController extends Controller
             return true;
         }
 
+        if ($role === 'partner_company') {
+            $institutionId = (int) ($user->platform_institution_id ?? 0);
+            if ($institutionId <= 0) {
+                return false;
+            }
+
+            $courseInstitutionId = \App\Models\Course::query()
+                ->whereKey($material->course_id)
+                ->value('platform_institution_id');
+
+            return $courseInstitutionId !== null && (int) $courseInstitutionId === $institutionId;
+        }
+
         if ($role !== 'instructor') {
             return false;
         }

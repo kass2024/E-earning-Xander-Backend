@@ -11,6 +11,7 @@ use App\Support\FrontendUrl;
 use App\Support\PlatformInstitutionHelper;
 use App\Support\PlatformUserService;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Stripe\Checkout\Session as StripeCheckoutSession;
 use Stripe\Stripe;
@@ -113,7 +114,7 @@ class InstitutionSignupService
                 $institution,
                 $user->email,
                 $plainPassword,
-                rtrim(FrontendUrl::base(), '/') . '/login',
+                $this->institutionLoginUrl($institution),
                 $isResend,
             ),
         );
@@ -121,20 +122,134 @@ class InstitutionSignupService
 
     public function resendOwnerCredentials(PlatformInstitution $institution): array
     {
+        return $this->resetOwnerPassword($institution, null, true);
+    }
+
+    public function institutionLoginUrl(PlatformInstitution $institution): string
+    {
+        $base = rtrim(FrontendUrl::base(), '/');
+        $slug = strtolower(trim((string) $institution->slug));
+
+        return $slug !== ''
+            ? $base . '/login/' . rawurlencode($slug)
+            : $base . '/login';
+    }
+
+    /** Ensure a partner owner account exists for institution login. */
+    public function ensureOwnerAccount(PlatformInstitution $institution): User
+    {
+        $institution->load('owner');
+        $email = strtolower(trim((string) $institution->contact_email));
+        if ($email === '') {
+            throw new \InvalidArgumentException('Institution contact email is required.');
+        }
+
         $user = $institution->owner;
-        if (!$user) {
-            return ['ok' => false, 'status' => 404, 'message' => 'Institution owner account not found.'];
+        if ($user && strtolower(trim((string) $user->email)) === $email) {
+            $dirty = false;
+            if ((int) $user->platform_institution_id !== (int) $institution->id) {
+                $user->platform_institution_id = $institution->id;
+                $dirty = true;
+            }
+            if (strtolower(trim((string) ($user->role ?? ''))) !== 'partner_company') {
+                $user->role = 'partner_company';
+                $dirty = true;
+            }
+            if ($dirty) {
+                $user->save();
+            }
+
+            return $user->fresh();
         }
 
-        $plainPassword = $this->generateOwnerPassword();
-        PlatformUserService::setUserPassword($user, $plainPassword);
-
-        $sent = $this->sendOwnerCredentials($institution->fresh(), $user, $plainPassword, true);
-        if (!$sent) {
-            return ['ok' => false, 'status' => 500, 'message' => 'Failed to send credentials email.'];
+        $user = User::query()->whereRaw('LOWER(TRIM(email)) = ?', [$email])->first();
+        if ($user) {
+            $user->role = 'partner_company';
+            $user->platform_institution_id = $institution->id;
+            $user->status = $this->ownerStatusForInstitution($institution);
+            if (trim((string) $user->name) === '') {
+                $user->name = trim($institution->name) . ' Admin';
+            }
+            $user->save();
+        } else {
+            $user = User::create([
+                'name' => trim($institution->name) . ' Admin',
+                'email' => $email,
+                'password' => Hash::make($this->generateOwnerPassword()),
+                'role' => 'partner_company',
+                'status' => $this->ownerStatusForInstitution($institution),
+                'phone' => $institution->contact_phone ?? '',
+                'platform_institution_id' => $institution->id,
+            ]);
         }
 
-        return ['ok' => true, 'message' => 'New login credentials emailed to ' . $user->email];
+        $institution->owner_user_id = $user->id;
+        $institution->save();
+
+        return $user->fresh();
+    }
+
+    /**
+     * Reset (or create) the institution owner password. Main admin does not need the old password.
+     */
+    public function resetOwnerPassword(
+        PlatformInstitution $institution,
+        ?string $plainPassword = null,
+        bool $sendEmail = true,
+    ): array {
+        $institution = $institution->fresh();
+        $user = $this->ensureOwnerAccount($institution);
+
+        $plain = trim((string) ($plainPassword ?? ''));
+        if ($plain === '') {
+            $plain = $this->generateOwnerPassword();
+        }
+        if (strlen($plain) < 8) {
+            return ['ok' => false, 'status' => 422, 'message' => 'Password must be at least 8 characters.'];
+        }
+
+        PlatformUserService::setUserPassword($user, $plain);
+        $user->status = $this->ownerStatusForInstitution($institution->fresh());
+        $user->save();
+
+        $loginUrl = $this->institutionLoginUrl($institution->fresh());
+
+        if ($sendEmail) {
+            $sent = $this->sendOwnerCredentials($institution->fresh(), $user->fresh(), $plain, true);
+            if (!$sent) {
+                return [
+                    'ok' => true,
+                    'message' => 'Password updated but the email could not be sent. Copy the password below.',
+                    'login_url' => $loginUrl,
+                    'owner_email' => $user->email,
+                    'password' => $plain,
+                ];
+            }
+
+            return [
+                'ok' => true,
+                'message' => 'New login credentials emailed to ' . $user->email,
+                'login_url' => $loginUrl,
+                'owner_email' => $user->email,
+            ];
+        }
+
+        return [
+            'ok' => true,
+            'message' => 'Owner password reset.',
+            'login_url' => $loginUrl,
+            'owner_email' => $user->email,
+            'password' => $plain,
+        ];
+    }
+
+    private function ownerStatusForInstitution(PlatformInstitution $institution): string
+    {
+        if ($institution->status !== 'active') {
+            return 'Pending';
+        }
+
+        return strtolower((string) $institution->payment_status) === 'unpaid' ? 'Unpaid' : 'Active';
     }
 
     public function createSignupCheckout(PlatformInstitution $institution): array

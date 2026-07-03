@@ -14,6 +14,7 @@ use App\Support\CourseMaterialHelper;
 use App\Support\QuizMaterialHelper;
 use App\Support\CourseDetailsHelper;
 use App\Support\CourseRevenueCalculator;
+use App\Support\PlatformTenantScope;
 use App\Services\LiveClassLobbyService;
 use App\Services\ZoomService;
 use Carbon\Carbon;
@@ -44,8 +45,20 @@ class InstructorDashboardController extends Controller
     {
         return User::query()
             ->whereRaw('LOWER(TRIM(email)) = ?', [strtolower(trim($email))])
-            ->whereIn('role', ['instructor', 'admin', 'staff'])
+            ->whereIn('role', ['instructor', 'admin', 'staff', 'partner_company'])
             ->first();
+    }
+
+    private function partnerOwnsCourse(User $user, int $courseId): bool
+    {
+        $institutionId = (int) ($user->platform_institution_id ?? 0);
+        if ($institutionId <= 0 || $courseId <= 0) {
+            return false;
+        }
+
+        $courseInstitutionId = Course::query()->whereKey($courseId)->value('platform_institution_id');
+
+        return $courseInstitutionId !== null && (int) $courseInstitutionId === $institutionId;
     }
 
     private function canHostMaterial(User $user, CourseMaterial $material): bool
@@ -53,6 +66,10 @@ class InstructorDashboardController extends Controller
         $role = strtolower(trim((string) ($user->role ?? '')));
         if (in_array($role, ['admin', 'staff'], true)) {
             return true;
+        }
+
+        if ($role === 'partner_company') {
+            return $this->partnerOwnsCourse($user, (int) $material->course_id);
         }
 
         if ($role !== 'instructor') {
@@ -71,6 +88,10 @@ class InstructorDashboardController extends Controller
         $role = strtolower(trim((string) ($user->role ?? '')));
         if (in_array($role, ['admin', 'staff'], true)) {
             return true;
+        }
+
+        if ($role === 'partner_company') {
+            return $this->partnerOwnsCourse($user, (int) $course->id);
         }
 
         if ($role !== 'instructor') {
@@ -319,6 +340,20 @@ class InstructorDashboardController extends Controller
             return response()->json(['message' => 'Email is required'], 400);
         }
 
+        $actor = User::query()
+            ->whereRaw('LOWER(TRIM(email)) = ?', [strtolower(trim($email))])
+            ->first();
+
+        if (!$actor) {
+            return response()->json(['message' => 'Instructor not found'], 404);
+        }
+
+        $role = strtolower(trim((string) ($actor->role ?? '')));
+
+        if (in_array($role, ['admin', 'staff', 'partner_company'], true)) {
+            return $this->liveClassesForPortalActor($request, $actor, $courseId);
+        }
+
         $instructor = $this->findInstructor($email);
         if (!$instructor) {
             return response()->json(['message' => 'Instructor not found'], 404);
@@ -332,16 +367,56 @@ class InstructorDashboardController extends Controller
             ])
             ->orderBy('title')
             ->get()
-            ->map(fn (Course $course) => [
-                'id' => $course->id,
-                'title' => $course->title,
-                'description' => $course->description,
-                'status' => $course->status,
-                'duration' => $course->duration,
-                'paid_enrollments_count' => (int) ($course->paid_enrollments_count ?? 0),
-            ])
+            ->map(fn (Course $course) => $this->mapLiveClassCourse($course))
             ->values();
 
+        return response()->json(
+            $this->buildLiveClassesPayload($actor, $courses, $courseIds, $courseId),
+            200
+        );
+    }
+
+    private function mapLiveClassCourse(Course $course): array
+    {
+        return [
+            'id' => $course->id,
+            'title' => $course->title,
+            'description' => $course->description,
+            'status' => $course->status,
+            'duration' => $course->duration,
+            'paid_enrollments_count' => (int) ($course->paid_enrollments_count ?? 0),
+        ];
+    }
+
+    private function liveClassesForPortalActor(Request $request, User $actor, $courseId)
+    {
+        $tenantId = PlatformTenantScope::resolveTenantId($request);
+
+        $coursesQuery = Course::query()
+            ->withCount([
+                'enrollments as paid_enrollments_count' => fn ($q) => $q->whereIn('status', ['paid', 'completed']),
+            ])
+            ->orderBy('title');
+
+        if ($tenantId !== null) {
+            $coursesQuery->where('platform_institution_id', $tenantId);
+        }
+
+        $courses = $coursesQuery
+            ->get()
+            ->map(fn (Course $course) => $this->mapLiveClassCourse($course))
+            ->values();
+
+        $courseIds = $courses->pluck('id');
+
+        return response()->json(
+            $this->buildLiveClassesPayload($actor, $courses, $courseIds, $courseId),
+            200
+        );
+    }
+
+    private function buildLiveClassesPayload(User $actor, $courses, $courseIds, $courseId): array
+    {
         $sessionsQuery = CourseMaterial::query()
             ->with('course:id,title')
             ->where('type', 'zoom')
@@ -379,11 +454,11 @@ class InstructorDashboardController extends Controller
             && !empty(config('services.zoom.client_id'))
             && !empty(config('services.zoom.client_secret'));
 
-        return response()->json([
+        return [
             'instructor' => [
-                'id' => $instructor->id,
-                'name' => $instructor->name,
-                'email' => $instructor->email,
+                'id' => $actor->id,
+                'name' => $actor->name,
+                'email' => $actor->email,
             ],
             'zoom' => [
                 'configured' => $zoomConfigured,
@@ -391,7 +466,7 @@ class InstructorDashboardController extends Controller
             ],
             'courses' => $courses,
             'sessions' => $sessions,
-        ], 200);
+        ];
     }
 
     public function startLiveSession(Request $request, CourseMaterial $material)
