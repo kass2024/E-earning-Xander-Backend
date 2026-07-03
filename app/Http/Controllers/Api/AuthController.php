@@ -88,10 +88,6 @@ class AuthController extends Controller
             $student = new Student();
             $student->first_name = $data['first_name'];
             $student->last_name = $data['last_name'] ?? null;
-            $student->name = trim($data['first_name'] . ' ' . ($data['last_name'] ?? ''));
-            if ($student->name === '') {
-                $student->name = $data['email'];
-            }
             $student->email = $data['email'];
             $student->status = 'Pending';
             $student->phone = $data['phone'] ?? '';
