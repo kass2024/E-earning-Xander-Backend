@@ -21,6 +21,8 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        $this->ensureStorageDirectories();
+
         $localDomain = config('mail.mailers.smtp.local_domain');
         if (empty($localDomain) || $localDomain === 'localhost') {
             $from = config('mail.from.address');
@@ -49,6 +51,26 @@ class AppServiceProvider extends ServiceProvider
             $schema->ensureDemoData();
         } catch (\Throwable $e) {
             Log::warning('AUTO_MIGRATE skipped', ['error' => $e->getMessage()]);
+        }
+    }
+
+    private function ensureStorageDirectories(): void
+    {
+        foreach ([
+            storage_path('framework/cache/data'),
+            storage_path('framework/sessions'),
+            storage_path('framework/views'),
+            storage_path('logs'),
+            base_path('bootstrap/cache'),
+        ] as $dir) {
+            if (!is_dir($dir)) {
+                @mkdir($dir, 0755, true);
+            }
+        }
+
+        $compiled = storage_path('framework/views');
+        if (config('view.compiled') === null || config('view.compiled') === '') {
+            config(['view.compiled' => $compiled]);
         }
     }
 }

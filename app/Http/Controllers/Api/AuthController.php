@@ -381,7 +381,7 @@ class AuthController extends Controller
                 ], 403);
             }
 
-            if ($reject = $this->rejectIfWrongInstitutionPortal($portalInstitutionId, $institution)) {
+            if ($reject = $this->rejectIfWrongInstitutionPortal($portalInstitutionId, $institution, $user)) {
                 return $reject;
             }
 
@@ -552,9 +552,16 @@ class AuthController extends Controller
     /**
      * When logging in via an institution-specific URL, reject accounts from other institutions.
      */
-    private function rejectIfWrongInstitutionPortal(?int $expectedInstitutionId, ?PlatformInstitution $userInstitution): ?JsonResponse
-    {
+    private function rejectIfWrongInstitutionPortal(
+        ?int $expectedInstitutionId,
+        ?PlatformInstitution $userInstitution,
+        ?User $user = null,
+    ): ?JsonResponse {
         if ($expectedInstitutionId === null) {
+            return null;
+        }
+
+        if ($user && PlatformInstitutionHelper::isMainPlatformAdmin($user)) {
             return null;
         }
 

@@ -14,7 +14,7 @@ return [
     'course_payments' => ['id', 'course_id', 'student_id', 'amount_cents', 'status', 'provider', 'platform_institution_id'],
     'platform_institutions' => [
         'id', 'name', 'slug', 'contact_email', 'status', 'payment_status', 'owner_user_id',
-        'mail_use_custom', 'mail_host',
+        'mail_use_custom', 'mail_host', 'portal_tagline', 'portal_hero_title',
     ],
     'institution_promo_codes' => ['id', 'code', 'max_uses', 'uses_count', 'is_active'],
     'institution_payments' => ['id', 'platform_institution_id', 'amount_cents', 'status'],

@@ -20,6 +20,11 @@ class PlatformInstitutionHelper
             return false;
         }
 
+        $email = strtolower(trim((string) ($user->email ?? '')));
+        if ($email !== '' && $email === PlatformUserService::adminEmail()) {
+            return true;
+        }
+
         return empty($user->platform_institution_id);
     }
 
