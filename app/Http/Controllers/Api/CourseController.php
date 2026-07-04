@@ -622,7 +622,7 @@ class CourseController extends Controller
             'learner_portal_url' => $learnerPortalUrl,
             'zoom_meeting_id' => $zoomMeetingId,
             'students_notified' => $notifiedCount,
-            'material' => $material ? CourseMaterialHelper::toLearnerArray($material) : null,
+            'material' => $material ? CourseMaterialHelper::toLiveClassArray($material) : null,
         ]);
     }
 

@@ -449,7 +449,28 @@ class InstructorDashboardController extends Controller
 
                 return $row;
             })
-            ->filter(fn (array $row) => ($row['session_status'] ?? '') === 'upcoming')
+            ->filter(function (array $row) {
+                if (($row['session_status'] ?? '') === 'upcoming') {
+                    return true;
+                }
+
+                if (($row['is_upcoming'] ?? false) === true) {
+                    return true;
+                }
+
+                $scheduledAt = $row['scheduled_at'] ?? $row['start_time'] ?? null;
+                if (!$scheduledAt) {
+                    return false;
+                }
+
+                try {
+                    $start = \Illuminate\Support\Carbon::parse($scheduledAt);
+                } catch (\Throwable) {
+                    return false;
+                }
+
+                return $start->isFuture();
+            })
             ->values();
 
         $zoomConfigured = !empty(config('services.zoom.account_id'))

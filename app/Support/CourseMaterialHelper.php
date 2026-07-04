@@ -285,6 +285,18 @@ class CourseMaterialHelper
 
         $now = now();
 
+        // Future start times stay upcoming even if Zoom lists the meeting id elsewhere.
+        if ($now->lt($scheduled)) {
+            return [
+                'session_status' => 'upcoming',
+                'can_join' => false,
+                'is_past' => false,
+                'is_upcoming' => true,
+                'is_live_now' => false,
+                'duration_minutes' => $durationMinutes,
+            ];
+        }
+
         $scheduledEnd = $scheduled->copy()->addMinutes($durationMinutes);
 
         $sessionStartedAt = null;
@@ -392,7 +404,7 @@ class CourseMaterialHelper
 
         $scheduled = self::scheduledAt($material);
 
-        $joinUrl = self::learnerJoinUrl($material);
+        $meta = is_array($material->metadata) ? $material->metadata : [];
 
         $state = self::liveSessionState($material, $liveMeetingIds);
 
@@ -416,9 +428,17 @@ class CourseMaterialHelper
 
             'host_room_path' => self::embedRoomPath($material, 1),
 
+            'share_path' => self::embedRoomPath($material, 0),
+
+            'share_url' => self::embedRoomUrl($material, 0),
+
             'start_time' => $scheduled?->toIso8601String(),
 
+            'scheduled_at' => $scheduled?->toIso8601String(),
+
             'description' => $material->description,
+
+            'timezone' => $meta['timezone'] ?? null,
 
             'type' => 'live_class',
 
