@@ -82,10 +82,11 @@ class ZoomMeetingBrandingResolver
         $useInstitutionBranding = (bool) ($branding['use_institution_logo'] ?? false);
 
         if ($isMainPlatformHost) {
-            unset($branding['use_institution_logo']);
+            unset($branding['use_institution_logo'], $branding['institution']);
             $branding['host']['avatar_url'] = $zoomHostContext['avatar_url'] ?? null;
             $branding['host']['name'] = $zoomHostContext['name'] ?? $branding['host']['name'];
             $branding['company']['name'] = $this->platformCompanyNameForResponse();
+            $branding['is_main_platform_host'] = true;
         } elseif ($useInstitutionBranding) {
             $institutionName = trim((string) ($branding['institution']['name'] ?? ''));
             if ($institutionName !== '') {

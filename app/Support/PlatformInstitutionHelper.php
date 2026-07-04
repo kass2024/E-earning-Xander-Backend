@@ -8,6 +8,10 @@ use App\Models\User;
 
 class PlatformInstitutionHelper
 {
+    /**
+     * Main platform operator (admin/staff with no institution link).
+     * Institution-linked admin/staff use tenant branding in header and Zoom.
+     */
     public static function isMainPlatformAdmin(?User $user): bool
     {
         if (!$user) {
@@ -18,11 +22,6 @@ class PlatformInstitutionHelper
 
         if (!in_array($role, ['admin', 'staff'], true)) {
             return false;
-        }
-
-        $email = strtolower(trim((string) ($user->email ?? '')));
-        if ($email !== '' && $email === PlatformUserService::adminEmail()) {
-            return true;
         }
 
         return empty($user->platform_institution_id);
@@ -40,7 +39,14 @@ class PlatformInstitutionHelper
 
     public static function hasAdminAccess(?User $user): bool
     {
-        return self::isMainPlatformAdmin($user) || self::isPartnerCompanyAdmin($user);
+        if (!$user) {
+            return false;
+        }
+
+        $role = strtolower(trim((string) ($user->role ?? '')));
+
+        return in_array($role, ['admin', 'staff'], true)
+            || self::isPartnerCompanyAdmin($user);
     }
 
     public static function resolveForUser(?User $user): ?PlatformInstitution
