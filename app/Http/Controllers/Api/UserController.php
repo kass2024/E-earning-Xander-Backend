@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\User;
 use App\Support\ApiListCache;
+use App\Support\InstructorLookup;
 use App\Support\PlatformTenantScope;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
@@ -74,9 +75,7 @@ class UserController extends Controller
             return response()->json(['message' => 'Email is required'], 400);
         }
 
-        $instructor = User::where('email', $email)
-            ->where('role', 'instructor')
-            ->first();
+        $instructor = InstructorLookup::byEmail($email);
 
         if (!$instructor) {
             return response()->json(['message' => 'Instructor not found'], 404);

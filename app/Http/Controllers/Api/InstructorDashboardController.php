@@ -10,6 +10,7 @@ use App\Models\InstructorPayoutRequest;
 use App\Models\StudyShift;
 use App\Support\InstructorPayoutMethods;
 use App\Models\User;
+use App\Support\InstructorLookup;
 use App\Support\CourseMaterialHelper;
 use App\Support\QuizMaterialHelper;
 use App\Support\CourseDetailsHelper;
@@ -35,10 +36,7 @@ class InstructorDashboardController extends Controller
 
     private function findInstructor(string $email): ?User
     {
-        return User::query()
-            ->where('email', $email)
-            ->where('role', 'instructor')
-            ->first();
+        return InstructorLookup::byEmail($email);
     }
 
     private function findLiveClassHost(string $email): ?User

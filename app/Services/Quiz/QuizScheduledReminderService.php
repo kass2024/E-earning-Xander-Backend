@@ -107,7 +107,7 @@ class QuizScheduledReminderService
             }
         }
 
-        if ($sent > 0 || $students->isNotEmpty()) {
+        if ($sent > 0) {
             $meta['reminder_90m_sent_at'] = now()->toIso8601String();
             $quiz->metadata = $meta;
             $quiz->save();

@@ -265,7 +265,7 @@ class LearnerDashboardController extends Controller
 
         $upcomingClasses = $this->buildUpcomingClasses($accessibleCourseIds);
 
-        $notifications = $this->buildNotifications($accessibleCourseIds);
+        $notifications = $this->buildNotifications($accessibleCourseIds, (int) $student->id);
 
 
 
@@ -474,7 +474,7 @@ class LearnerDashboardController extends Controller
 
         return response()->json([
 
-            'notifications' => $this->buildNotifications($paidCourseIds),
+            'notifications' => $this->buildNotifications($paidCourseIds, (int) $student->id),
 
         ], 200);
 
@@ -619,7 +619,7 @@ class LearnerDashboardController extends Controller
 
 
 
-    private function buildNotifications($paidCourseIds): array
+    private function buildNotifications($paidCourseIds, ?int $studentId = null): array
 
     {
 
@@ -708,7 +708,17 @@ class LearnerDashboardController extends Controller
             ->orderByDesc('updated_at')
             ->limit(30)
             ->get()
-            ->filter(fn (CourseMaterial $material) => QuizMaterialHelper::isPublished($material));
+            ->filter(function (CourseMaterial $material) use ($studentId) {
+                if (!QuizMaterialHelper::isPublished($material)) {
+                    return false;
+                }
+
+                if ($studentId !== null && !QuizMaterialHelper::isVisibleToStudent($material, $studentId)) {
+                    return false;
+                }
+
+                return true;
+            });
 
         foreach ($recentQuizzes as $material) {
             $meta = QuizMaterialHelper::meta($material);

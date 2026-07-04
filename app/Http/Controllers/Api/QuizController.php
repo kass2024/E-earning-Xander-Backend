@@ -18,6 +18,7 @@ use App\Services\Quiz\QuizPublishedNotificationService;
 use App\Services\QuizAiService;
 use App\Support\QuizMaterialHelper;
 use App\Support\MaterialLanguageHelper;
+use App\Support\InstructorLookup;
 use App\Services\MaterialDocumentReader;
 use App\Support\QuizAudioHelper;
 use App\Services\PCloudService;
@@ -79,10 +80,7 @@ class QuizController extends Controller
         ]);
 
         $material = CourseMaterial::findOrFail($data['material_id']);
-        $instructor = User::query()
-            ->where('email', $data['instructor_email'])
-            ->where('role', 'instructor')
-            ->first();
+        $instructor = InstructorLookup::byEmail($data['instructor_email']);
 
         if (!$instructor || !$instructor->assignedCourses()->where('courses.id', $material->course_id)->exists()) {
             return response()->json(['message' => 'You are not assigned to this course.'], 403);
@@ -108,10 +106,7 @@ class QuizController extends Controller
         $course = Course::findOrFail($data['course_id']);
 
         if (!empty($data['instructor_email'])) {
-            $instructor = User::query()
-                ->where('email', $data['instructor_email'])
-                ->where('role', 'instructor')
-                ->first();
+            $instructor = InstructorLookup::byEmail($data['instructor_email']);
 
             if (!$instructor || !$instructor->assignedCourses()->where('courses.id', $course->id)->exists()) {
                 return response()->json(['message' => 'You are not assigned to this course.'], 403);
@@ -208,10 +203,7 @@ class QuizController extends Controller
             'question_types.*' => 'string|in:multiple_choice,multiple_response,true_false,matching,fill_blank,short_answer,long_answer,essay,case_study,problem_solving,scenario,hots,oral_listen',
         ]);
 
-        $instructor = User::query()
-            ->where('email', $data['instructor_email'])
-            ->where('role', 'instructor')
-            ->first();
+        $instructor = InstructorLookup::byEmail($data['instructor_email']);
 
         if (!$instructor) {
             return response()->json(['message' => 'Instructor not found'], 404);
@@ -295,10 +287,7 @@ class QuizController extends Controller
     {
         $data = $this->validateQuizPayload($request);
 
-        $instructor = User::query()
-            ->where('email', $data['instructor_email'])
-            ->where('role', 'instructor')
-            ->first();
+        $instructor = InstructorLookup::byEmail($data['instructor_email']);
 
         if (!$instructor) {
             return response()->json(['message' => 'Instructor not found'], 404);
@@ -353,10 +342,7 @@ class QuizController extends Controller
             return response()->json(['message' => 'instructor_email is required'], 400);
         }
 
-        $instructor = User::query()
-            ->where('email', $email)
-            ->where('role', 'instructor')
-            ->first();
+        $instructor = InstructorLookup::byEmail($email);
 
         if (!$instructor) {
             return response()->json(['message' => 'Instructor not found'], 404);
@@ -387,10 +373,7 @@ class QuizController extends Controller
 
         $data = $this->validateQuizPayload($request, false);
 
-        $instructor = User::query()
-            ->where('email', $data['instructor_email'])
-            ->where('role', 'instructor')
-            ->first();
+        $instructor = InstructorLookup::byEmail($data['instructor_email']);
 
         if (!$instructor) {
             return response()->json(['message' => 'Instructor not found'], 404);
@@ -453,10 +436,7 @@ class QuizController extends Controller
             'scheduled_at' => 'nullable|date',
         ]);
 
-        $instructor = User::query()
-            ->where('email', $data['instructor_email'])
-            ->where('role', 'instructor')
-            ->first();
+        $instructor = InstructorLookup::byEmail($data['instructor_email']);
 
         if (!$instructor) {
             return response()->json(['message' => 'Instructor not found'], 404);
@@ -639,10 +619,7 @@ class QuizController extends Controller
         }
 
         $data = $request->validate(['instructor_email' => 'required|email']);
-        $instructor = User::query()
-            ->where('email', $data['instructor_email'])
-            ->where('role', 'instructor')
-            ->first();
+        $instructor = InstructorLookup::byEmail($data['instructor_email']);
 
         if (!$instructor || !$instructor->assignedCourses()->where('courses.id', $quiz->course_id)->exists()) {
             return response()->json(['message' => 'You are not assigned to this course.'], 403);
@@ -786,10 +763,7 @@ class QuizController extends Controller
         }
 
         $data = $request->validate(['instructor_email' => 'required|email']);
-        $instructor = User::query()
-            ->where('email', $data['instructor_email'])
-            ->where('role', 'instructor')
-            ->first();
+        $instructor = InstructorLookup::byEmail($data['instructor_email']);
 
         if (!$instructor || !$instructor->assignedCourses()->where('courses.id', $quiz->course_id)->exists()) {
             return response()->json(['message' => 'You are not assigned to this course.'], 403);
@@ -863,10 +837,7 @@ class QuizController extends Controller
             'grades.*.feedback' => 'nullable|string|max:2000',
         ]);
 
-        $instructor = User::query()
-            ->where('email', $data['instructor_email'])
-            ->where('role', 'instructor')
-            ->first();
+        $instructor = InstructorLookup::byEmail($data['instructor_email']);
 
         if (!$instructor || !$instructor->assignedCourses()->where('courses.id', $quiz->course_id)->exists()) {
             return response()->json(['message' => 'You are not assigned to this course.'], 403);
@@ -931,10 +902,7 @@ class QuizController extends Controller
         }
 
         if (!$allowed && !empty($data['instructor_email'])) {
-            $instructor = User::query()
-                ->where('email', $data['instructor_email'])
-                ->where('role', 'instructor')
-                ->first();
+            $instructor = InstructorLookup::byEmail($data['instructor_email']);
             $allowed = $instructor && $instructor->assignedCourses()->where('courses.id', $quiz->course_id)->exists();
             $audience = 'instructor';
         }
@@ -1074,10 +1042,7 @@ class QuizController extends Controller
             'course_id' => 'required|integer|exists:courses,id',
         ]);
 
-        $instructor = User::query()
-            ->where('email', $data['instructor_email'])
-            ->where('role', 'instructor')
-            ->first();
+        $instructor = InstructorLookup::byEmail($data['instructor_email']);
 
         if (!$instructor || !$instructor->assignedCourses()->where('courses.id', $data['course_id'])->exists()) {
             return response()->json(['message' => 'You are not assigned to this course.'], 403);
@@ -1111,10 +1076,7 @@ class QuizController extends Controller
             'filename' => 'required|string|max:255',
         ]);
 
-        $instructor = User::query()
-            ->where('email', $data['instructor_email'])
-            ->where('role', 'instructor')
-            ->first();
+        $instructor = InstructorLookup::byEmail($data['instructor_email']);
 
         if (!$instructor || !$instructor->assignedCourses()->where('courses.id', $data['course_id'])->exists()) {
             return response()->json(['message' => 'You are not assigned to this course.'], 403);
@@ -1148,10 +1110,7 @@ class QuizController extends Controller
             'audio' => 'required|file|mimes:mp3,wav,m4a,aac,ogg,webm|max:15360',
         ]);
 
-        $instructor = User::query()
-            ->where('email', $data['instructor_email'])
-            ->where('role', 'instructor')
-            ->first();
+        $instructor = InstructorLookup::byEmail($data['instructor_email']);
 
         if (!$instructor || !$instructor->assignedCourses()->where('courses.id', $data['course_id'])->exists()) {
             return response()->json(['message' => 'You are not assigned to this course.'], 403);
@@ -1258,10 +1217,7 @@ class QuizController extends Controller
         $allowed = false;
 
         if (!empty($data['instructor_email'])) {
-            $instructor = User::query()
-                ->where('email', $data['instructor_email'])
-                ->where('role', 'instructor')
-                ->first();
+            $instructor = InstructorLookup::byEmail($data['instructor_email']);
             $allowed = $instructor && $instructor->assignedCourses()->where('courses.id', $course->id)->exists();
         }
 
