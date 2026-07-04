@@ -21,6 +21,7 @@
 /public/hot
 /public/storage
 /vendor
+# .htaccess is tracked — required for cPanel SPA routing + API rewrite rules
 Homestead.json
 Homestead.yaml
 Thumbs.db

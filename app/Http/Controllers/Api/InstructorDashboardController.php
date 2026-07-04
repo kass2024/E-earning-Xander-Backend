@@ -430,22 +430,26 @@ class InstructorDashboardController extends Controller
         }
 
         $sessions = $sessionsQuery
-            ->limit($courseId ? 20 : 12)
-            ->get()
-            ->map(fn (CourseMaterial $material) => [
-                'id' => $material->id,
-                'title' => $material->title,
-                'course_id' => $material->course_id,
-                'course_title' => $material->course?->title,
-                'description' => $material->description,
-                'meeting_id' => CourseMaterialHelper::meetingId($material),
-                'join_url' => null,
-                'embed_room_path' => CourseMaterialHelper::embedRoomPath($material, 0),
-                'host_room_path' => CourseMaterialHelper::embedRoomPath($material, 1),
-                'start_url' => null,
-                'scheduled_at' => CourseMaterialHelper::scheduledAt($material)?->toIso8601String(),
-                'created_at' => $material->created_at?->toIso8601String(),
-            ])
+            ->limit($courseId ? 50 : 30)
+            ->get();
+
+        $liveMeetingIds = [];
+        try {
+            $liveMeetingIds = $this->zoom->fetchLiveMeetingIds();
+        } catch (\Throwable) {
+            $liveMeetingIds = [];
+        }
+
+        $sessions = $sessions
+            ->map(function (CourseMaterial $material) use ($liveMeetingIds) {
+                $row = CourseMaterialHelper::toLiveClassArray($material, $liveMeetingIds);
+                $row['scheduled_at'] = $row['start_time']
+                    ?? CourseMaterialHelper::scheduledAt($material)?->toIso8601String();
+                $row['created_at'] = $material->created_at?->toIso8601String();
+
+                return $row;
+            })
+            ->filter(fn (array $row) => ($row['session_status'] ?? '') === 'upcoming')
             ->values();
 
         $zoomConfigured = !empty(config('services.zoom.account_id'))

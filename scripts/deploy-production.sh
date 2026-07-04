@@ -48,8 +48,17 @@ php artisan config:cache
 php artisan route:cache
 php artisan view:cache
 
-echo "==> 7/7 Schema + pCloud health"
+echo "==> 7/8 Schema + pCloud health"
 php artisan tinker --execute="echo json_encode(app(\App\Services\DatabaseSchemaService::class)->status(), JSON_PRETTY_PRINT);"
+
+echo "==> 8/8 Verify .htaccess files (required for cPanel routing)"
+for f in .htaccess public/.htaccess; do
+  if [ ! -f "$f" ]; then
+    echo "ERROR: Missing $f — restore from repo before serving traffic."
+    exit 1
+  fi
+  echo "  OK: $f"
+done
 
 API_URL="${APP_URL:-https://api.xanderglobalscholars.com}"
 FRONTEND_URL="${FRONTEND_URL:-https://xanderglobalacademy.com}"
