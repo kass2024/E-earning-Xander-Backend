@@ -82,10 +82,36 @@ class PlatformInstitutionHelper
             ->whereRaw('LOWER(TRIM(email)) = ?', [$normalized])
             ->first();
         if ($user) {
-            return self::resolveForUser($user);
+            $fromUser = self::resolveForUser($user);
+            if ($fromUser) {
+                return $fromUser;
+            }
+
+            if (strtolower(trim((string) ($user->role ?? ''))) === 'instructor') {
+                return self::resolveForInstructorCourses($user);
+            }
         }
 
         return null;
+    }
+
+    /** Partner institution from any course the instructor is assigned to. */
+    public static function resolveForInstructorCourses(?User $user): ?PlatformInstitution
+    {
+        if (!$user) {
+            return null;
+        }
+
+        $institutionId = $user->assignedCourses()
+            ->whereNotNull('courses.platform_institution_id')
+            ->orderByDesc('courses.updated_at')
+            ->value('courses.platform_institution_id');
+
+        if (!$institutionId) {
+            return null;
+        }
+
+        return PlatformInstitution::find((int) $institutionId);
     }
 
     public static function institutionPayload(?PlatformInstitution $institution): ?array

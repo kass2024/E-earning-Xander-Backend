@@ -126,10 +126,7 @@ class ZoomEmbedController extends Controller
         );
 
         if ($role === 1 && ($branding['use_institution_logo'] ?? false)) {
-            $institutionName = trim((string) ($branding['institution']['name'] ?? $branding['host']['name'] ?? ''));
-            if ($institutionName !== '') {
-                $payload['user_name'] = $institutionName;
-            }
+            $payload['user_name'] = $this->institutionHostJoinName($branding);
         }
 
         if ($role === 1) {
@@ -314,7 +311,9 @@ class ZoomEmbedController extends Controller
         );
 
         if ($role === 1 && ($branding['use_institution_logo'] ?? false)) {
-            $userName = trim((string) ($branding['host']['name'] ?? $userName));
+            $userName = $this->institutionHostJoinName($branding);
+        } elseif ($role === 1 && $actorUser && PlatformInstitutionHelper::isMainPlatformAdmin($actorUser)) {
+            $userName = $this->resolveZoomHostJoinName($userName);
         }
 
         try {
@@ -386,7 +385,7 @@ class ZoomEmbedController extends Controller
         );
 
         if ($branding['use_institution_logo'] ?? false) {
-            $userName = trim((string) ($branding['host']['name'] ?? $userName));
+            $userName = $this->institutionHostJoinName($branding);
         }
 
         $meetingDetails = $this->fetchMeetingDetailsForSdk($meetingId);
@@ -422,7 +421,24 @@ class ZoomEmbedController extends Controller
      */
     protected function meetingBrandingPayload(?string $actorEmail = null, ?int $platformInstitutionId = null): array
     {
+        if ($actorEmail) {
+            $actorUser = User::query()
+                ->whereRaw('LOWER(TRIM(email)) = ?', [strtolower(trim($actorEmail))])
+                ->first();
+            if ($actorUser && PlatformInstitutionHelper::isMainPlatformAdmin($actorUser)) {
+                $platformInstitutionId = null;
+            }
+        }
+
         return $this->brandingResolver->resolve($actorEmail, $platformInstitutionId);
+    }
+
+    /** Institution display name in Zoom SDK (never the instructor's personal name). */
+    protected function institutionHostJoinName(array $branding): string
+    {
+        $name = trim((string) ($branding['institution']['name'] ?? $branding['company']['name'] ?? ''));
+
+        return $name !== '' ? $name : 'Host';
     }
 
     /**

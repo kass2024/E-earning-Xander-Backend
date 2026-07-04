@@ -574,10 +574,8 @@ class LiveZoomCohortController extends Controller
 
             $hostName = trim((string) ($branding['host']['name'] ?? $hostContext['name']));
             if ($branding['use_institution_logo'] ?? false) {
-                $institutionName = trim((string) ($branding['institution']['name'] ?? ''));
-                if ($institutionName !== '') {
-                    $hostName = $institutionName;
-                }
+                $institutionName = trim((string) ($branding['institution']['name'] ?? $branding['company']['name'] ?? ''));
+                $hostName = $institutionName !== '' ? $institutionName : 'Host';
             }
 
             // Embedded Meeting SDK: same-account host uses role=1 JWT signature (no ZAK).

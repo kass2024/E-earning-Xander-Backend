@@ -38,7 +38,6 @@ class ZoomMeetingBrandingResolver
         if ($institution && $useInstitutionBranding) {
             $companyName = $institution->name ?: $companyName;
             $avatarUrl = $this->institutionLogoUrl($institution);
-            $hostName = $institution->name ?: $hostName;
         }
 
         $payload = [
@@ -82,7 +81,17 @@ class ZoomMeetingBrandingResolver
         $isConfiguredZoomHost = $this->isConfiguredZoomHostActor($zoomHostContext, $actorEmail);
         $useInstitutionBranding = (bool) ($branding['use_institution_logo'] ?? false);
 
-        if ($isMainPlatformHost || $isConfiguredZoomHost || !$useInstitutionBranding) {
+        if ($isMainPlatformHost) {
+            unset($branding['use_institution_logo']);
+            $branding['host']['avatar_url'] = $zoomHostContext['avatar_url'] ?? null;
+            $branding['host']['name'] = $zoomHostContext['name'] ?? $branding['host']['name'];
+            $branding['company']['name'] = $this->platformCompanyNameForResponse();
+        } elseif ($useInstitutionBranding) {
+            $institutionName = trim((string) ($branding['institution']['name'] ?? ''));
+            if ($institutionName !== '') {
+                $branding['company']['name'] = $institutionName;
+            }
+        } elseif ($isConfiguredZoomHost || !$useInstitutionBranding) {
             unset($branding['use_institution_logo']);
             $branding['host']['avatar_url'] = $zoomHostContext['avatar_url'] ?? null;
             $branding['host']['name'] = $zoomHostContext['name'] ?? $branding['host']['name'];
@@ -137,7 +146,14 @@ class ZoomMeetingBrandingResolver
         }
 
         if ($actorUser && !PlatformInstitutionHelper::isMainPlatformAdmin($actorUser)) {
-            return !empty($actorUser->platform_institution_id);
+            if (!empty($actorUser->platform_institution_id)) {
+                return true;
+            }
+
+            $role = strtolower(trim((string) ($actorUser->role ?? '')));
+            if ($role === 'instructor' && $platformInstitutionId) {
+                return true;
+            }
         }
 
         return false;
