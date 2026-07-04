@@ -86,6 +86,7 @@ class ZoomMeetingBrandingResolver
             unset($branding['use_institution_logo']);
             $branding['host']['avatar_url'] = $zoomHostContext['avatar_url'] ?? null;
             $branding['host']['name'] = $zoomHostContext['name'] ?? $branding['host']['name'];
+            $branding['company']['name'] = $this->platformCompanyNameForResponse();
         }
 
         if (empty($branding['host']['email'] ?? null) && !empty($zoomHostContext['email'])) {
@@ -122,27 +123,12 @@ class ZoomMeetingBrandingResolver
             return false;
         }
 
-        if ($actorEmail) {
-            $user = User::query()
-                ->whereRaw('LOWER(email) = ?', [strtolower(trim($actorEmail))])
-                ->first();
-
-            if ($user && PlatformInstitutionHelper::isMainPlatformAdmin($user)) {
-                return false;
-            }
+        $actorUser = $this->resolveActorUser($actorEmail);
+        if ($actorUser && PlatformInstitutionHelper::isMainPlatformAdmin($actorUser)) {
+            return false;
         }
 
         if ($cohort && !empty($cohort->platform_institution_id)) {
-            if ($actorEmail) {
-                $user = User::query()
-                    ->whereRaw('LOWER(email) = ?', [strtolower(trim($actorEmail))])
-                    ->first();
-
-                if ($user && PlatformInstitutionHelper::isMainPlatformAdmin($user)) {
-                    return false;
-                }
-            }
-
             return true;
         }
 
@@ -150,17 +136,22 @@ class ZoomMeetingBrandingResolver
             return true;
         }
 
-        if ($actorEmail) {
-            $user = User::query()
-                ->whereRaw('LOWER(email) = ?', [strtolower(trim($actorEmail))])
-                ->first();
-
-            if ($user && !PlatformInstitutionHelper::isMainPlatformAdmin($user)) {
-                return !empty($user->platform_institution_id);
-            }
+        if ($actorUser && !PlatformInstitutionHelper::isMainPlatformAdmin($actorUser)) {
+            return !empty($actorUser->platform_institution_id);
         }
 
         return false;
+    }
+
+    private function resolveActorUser(?string $actorEmail): ?User
+    {
+        if (!$actorEmail) {
+            return null;
+        }
+
+        return User::query()
+            ->whereRaw('LOWER(TRIM(email)) = ?', [strtolower(trim($actorEmail))])
+            ->first();
     }
 
     private function resolveInstitution(

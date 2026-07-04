@@ -294,17 +294,19 @@ class ZoomEmbedController extends Controller
         $platformInstitutionId = isset($data['platform_institution_id'])
             ? (int) $data['platform_institution_id']
             : null;
-        if (!$platformInstitutionId && !empty($material->course?->platform_institution_id)) {
-            $platformInstitutionId = (int) $material->course->platform_institution_id;
-        }
-
         $actorEmail = trim((string) ($data['user_email'] ?? $data['instructor_email'] ?? ''));
         $actorEmail = $actorEmail !== '' ? $actorEmail : null;
+        $actorUser = $actorEmail
+            ? User::query()->whereRaw('LOWER(TRIM(email)) = ?', [strtolower(trim($actorEmail))])->first()
+            : null;
+        if (!$platformInstitutionId && !empty($material->course?->platform_institution_id)) {
+            if (!$actorUser || !PlatformInstitutionHelper::isMainPlatformAdmin($actorUser)) {
+                $platformInstitutionId = (int) $material->course->platform_institution_id;
+            }
+        }
+
         $zoomHost = $this->zoomService->resolveConfiguredHostBranding();
         $branding = $this->meetingBrandingPayload($actorEmail, $platformInstitutionId);
-        $actorUser = $actorEmail
-            ? User::query()->whereRaw('LOWER(email) = ?', [strtolower(trim($actorEmail))])->first()
-            : null;
         $branding = $this->brandingResolver->finalizeHostSdkBranding(
             $branding,
             $zoomHost,

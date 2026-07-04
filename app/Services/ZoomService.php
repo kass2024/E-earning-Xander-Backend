@@ -1115,7 +1115,8 @@ class ZoomService
             return null;
         }
 
-        $startTime = $this->formatMeetingStartTime($data['start_time'] ?? null);
+        $timezone = trim((string) ($data['timezone'] ?? '')) ?: 'UTC';
+        $startTime = $this->formatMeetingStartTime($data['start_time'] ?? null, $timezone);
         $recurrenceKey = strtolower(trim((string) ($data['recurrence'] ?? 'none')));
         $recurrence = $this->buildRecurrencePayload($recurrenceKey, $startTime);
 
@@ -1124,7 +1125,7 @@ class ZoomService
             'type' => $recurrence ? 8 : 2,
             'start_time' => $startTime,
             'duration' => max(1, (int) ($data['duration'] ?? 60)),
-            'timezone' => $data['timezone'] ?? 'UTC',
+            'timezone' => $timezone,
             'agenda' => $data['agenda'] ?? '',
             'password' => $data['password'] ?? null,
             'settings' => $this->buildMeetingSettings($data),
@@ -1134,18 +1135,84 @@ class ZoomService
             $payload['recurrence'] = $recurrence;
         }
 
-        $result = $this->createMeetingForHost($payload, $userId);
-        if (is_array($result) && !empty($result['error'])) {
-            return $result;
+        $hostId = ($userId === 'me' || trim((string) $userId) === '' || str_contains((string) $userId, '@'))
+            ? $this->resolveHostUserId()
+            : (string) $userId;
+
+        $result = $this->createMeetingForHost($payload, $hostId);
+        if (is_array($result) && !empty($result['error']) && $this->toBool($data['auto_recording'] ?? false)) {
+            if ($this->isRecordingRelatedError($result)) {
+                $payload['settings']['auto_recording'] = 'none';
+                $retry = $this->createMeetingForHost($payload, $hostId);
+                if (is_array($retry) && empty($retry['error'])) {
+                    $retry['recording_fallback'] = true;
+
+                    return $retry;
+                }
+            }
         }
 
         return $result;
     }
 
-    protected function formatMeetingStartTime(mixed $value): ?string
+    /**
+     * @param  array<string, mixed>|null  $body
+     */
+    public function formatZoomApiErrorMessage(mixed $body): string
+    {
+        if (!is_array($body)) {
+            return 'Zoom returned an error while creating the meeting.';
+        }
+
+        $message = trim((string) ($body['message'] ?? ''));
+        if ($message !== '') {
+            return $message;
+        }
+
+        $errors = $body['errors'] ?? null;
+        if (is_array($errors)) {
+            $parts = [];
+            foreach ($errors as $fieldErrors) {
+                if (is_array($fieldErrors)) {
+                    foreach ($fieldErrors as $part) {
+                        if (is_string($part) && trim($part) !== '') {
+                            $parts[] = trim($part);
+                        }
+                    }
+                } elseif (is_string($fieldErrors) && trim($fieldErrors) !== '') {
+                    $parts[] = trim($fieldErrors);
+                }
+            }
+
+            if ($parts !== []) {
+                return implode(' ', $parts);
+            }
+        }
+
+        return 'Zoom returned an error while creating the meeting.';
+    }
+
+    /**
+     * @param  array<string, mixed>  $result
+     */
+    protected function isRecordingRelatedError(array $result): bool
+    {
+        $body = $result['body'] ?? [];
+        $haystack = strtolower(json_encode($body) ?: '');
+
+        return str_contains($haystack, 'recording')
+            || str_contains($haystack, 'cloud')
+            || str_contains($haystack, 'cmr');
+    }
+
+    protected function formatMeetingStartTime(mixed $value, ?string $timezone = null): ?string
     {
         if ($value === null || $value === '') {
             return null;
+        }
+
+        if (is_string($value) && preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/', $value) === 1) {
+            return strlen($value) === 16 ? $value . ':00' : $value;
         }
 
         if ($value instanceof \DateTimeInterface) {
@@ -1153,7 +1220,9 @@ class ZoomService
         }
 
         try {
-            return (new \DateTime((string) $value))->format('Y-m-d\TH:i:s');
+            $tz = trim((string) ($timezone ?? '')) ?: date_default_timezone_get();
+
+            return \Carbon\Carbon::parse((string) $value, $tz)->format('Y-m-d\TH:i:s');
         } catch (\Throwable) {
             return (string) $value;
         }

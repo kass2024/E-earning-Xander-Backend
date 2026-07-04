@@ -23,6 +23,7 @@ use App\Services\ZoomService;
 use App\Support\CourseDetailsHelper;
 use App\Support\CourseMaterialHelper;
 use App\Support\EnrollmentStatusHelper;
+use App\Support\InstructorLookup;
 use App\Support\PlatformTenantScope;
 use App\Support\ResolvesEnrollmentStaff;
 use App\Services\CourseCodeGenerator;
@@ -411,10 +412,7 @@ class CourseController extends Controller
 
         $instructor = null;
         if (!empty($data['instructor_email'])) {
-            $instructor = User::query()
-                ->where('email', $data['instructor_email'])
-                ->where('role', 'instructor')
-                ->first();
+            $instructor = InstructorLookup::byEmail($data['instructor_email']);
 
             if (!$instructor) {
                 return response()->json(['message' => 'Instructor not found.'], 404);
@@ -427,21 +425,33 @@ class CourseController extends Controller
             }
         }
 
+        $timezone = trim((string) ($data['timezone'] ?? '')) ?: config('app.timezone', 'UTC');
+        try {
+            $scheduledAt = Carbon::parse($data['start_time'], $timezone);
+        } catch (\Throwable $e) {
+            return response()->json(['message' => 'Invalid start time. Choose a valid date and time.'], 422);
+        }
+
+        if ($scheduledAt->lte(now())) {
+            return response()->json(['message' => 'Scheduled time must be in the future.'], 422);
+        }
+
         $zoomJoinLink = $data['zoom_link'] ?? null;
         $zoomStartUrl = null;
         $zoomMeetingId = null;
         $zoomPassword = null;
         $joinPwd = null;
+        $recordingFallback = false;
 
         if (!$zoomJoinLink) {
-            $hostId = (string) config('services.zoom.host_user_id', 'me');
+            $hostId = $this->zoom->resolveHostUserId();
             $topic = trim((string) ($data['topic'] ?? '')) ?: ($course->title ?? 'Course Class');
 
             $zoomPayload = [
                 'topic' => $topic,
-                'start_time' => $data['start_time'],
+                'start_time' => $scheduledAt->format('Y-m-d\TH:i:s'),
                 'duration' => $data['duration'] ?? 60,
-                'timezone' => $data['timezone'] ?? config('app.timezone', 'UTC'),
+                'timezone' => $timezone,
                 'agenda' => $data['notes'] ?? '',
                 'join_before_host' => (bool) ($data['join_before_host'] ?? false),
                 'waiting_room' => !((bool) ($data['join_before_host'] ?? false)),
@@ -468,7 +478,7 @@ class CourseController extends Controller
 
             if (isset($zoomData['error']) && !empty($zoomData['error'])) {
                 $body = $zoomData['body'] ?? [];
-                $message = $body['message'] ?? 'Zoom returned an error while creating the meeting.';
+                $message = $this->zoom->formatZoomApiErrorMessage($body);
 
                 return response()->json([
                     'message' => $message,
@@ -476,6 +486,7 @@ class CourseController extends Controller
                 ], 422);
             }
 
+            $recordingFallback = !empty($zoomData['recording_fallback']);
             $zoomJoinLink = $zoomData['join_url'] ?? null;
             $zoomStartUrl = $zoomData['start_url'] ?? null;
             $zoomMeetingId = $zoomData['id'] ?? null;
@@ -501,34 +512,48 @@ class CourseController extends Controller
 
         $notifyOnly = !empty($data['notify_only']);
         $material = null;
+        $recordingEnabled = (bool) ($data['auto_recording'] ?? false) && empty($recordingFallback);
         if (!$notifyOnly) {
-            $materialTitle = trim((string) ($data['topic'] ?? '')) ?: ('Live class - ' . Carbon::parse($data['start_time'])->format('M j, Y g:i A'));
+            $materialTitle = trim((string) ($data['topic'] ?? '')) ?: ('Live class - ' . $scheduledAt->copy()->timezone($timezone)->format('M j, Y g:i A'));
             if ($joinPwd === null && is_string($zoomJoinLink)) {
                 $joinPwd = $this->zoom->extractPasswordFromJoinUrl($zoomJoinLink);
             }
-            $material = CourseMaterial::create([
-                'course_id' => $course->id,
-                'title' => $materialTitle,
-                'description' => $data['notes'] ?? null,
-                'type' => 'zoom',
-                'resource_url' => $zoomJoinLink,
-                'scheduled_at' => $data['start_time'],
-                'metadata' => [
-                    'join_url' => $zoomJoinLink,
-                    'start_url' => $zoomStartUrl,
-                    'meeting_id' => $zoomMeetingId,
-                    'password' => $zoomPassword,
-                    'join_pwd' => $joinPwd,
-                    'duration' => $data['duration'] ?? 60,
-                    'timezone' => $data['timezone'] ?? config('app.timezone', 'UTC'),
-                    'auto_recording' => (bool) ($data['auto_recording'] ?? false),
-                    'recording_enabled' => (bool) ($data['auto_recording'] ?? false),
-                    'join_before_host' => (bool) ($data['join_before_host'] ?? false),
-                    'waiting_room' => !((bool) ($data['join_before_host'] ?? false)),
-                    'mute_upon_entry' => (bool) ($data['mute_upon_entry'] ?? true),
-                ],
-                'sort_order' => 0,
-            ]);
+
+            try {
+                $material = CourseMaterial::create([
+                    'course_id' => $course->id,
+                    'title' => $materialTitle,
+                    'description' => $data['notes'] ?? null,
+                    'type' => 'zoom',
+                    'resource_url' => $zoomJoinLink,
+                    'scheduled_at' => $scheduledAt,
+                    'metadata' => [
+                        'join_url' => $zoomJoinLink,
+                        'start_url' => $zoomStartUrl,
+                        'meeting_id' => $zoomMeetingId,
+                        'password' => $zoomPassword,
+                        'join_pwd' => $joinPwd,
+                        'duration' => $data['duration'] ?? 60,
+                        'timezone' => $timezone,
+                        'auto_recording' => $recordingEnabled,
+                        'recording_enabled' => $recordingEnabled,
+                        'join_before_host' => (bool) ($data['join_before_host'] ?? false),
+                        'waiting_room' => !((bool) ($data['join_before_host'] ?? false)),
+                        'mute_upon_entry' => (bool) ($data['mute_upon_entry'] ?? true),
+                    ],
+                    'sort_order' => 0,
+                ]);
+            } catch (\Throwable $e) {
+                Log::error('Failed to save scheduled live class material', [
+                    'course_id' => $course->id,
+                    'zoom_meeting_id' => $zoomMeetingId,
+                    'error' => $e->getMessage(),
+                ]);
+
+                return response()->json([
+                    'message' => 'Zoom meeting was created but saving the class failed. Run php artisan migrate on the server, then try again.',
+                ], 500);
+            }
         }
 
         $hostRoomUrl = $material ? CourseMaterialHelper::embedRoomUrl($material, 1) : null;
@@ -541,7 +566,7 @@ class CourseController extends Controller
                 new StaffClassScheduledMail(
                     $staff,
                     $course,
-                    $data['start_time'],
+                    $scheduledAt->toIso8601String(),
                     $hostRoomUrl ?? $learnerPortalUrl,
                     $data['notes'] ?? null,
                     $hostRoomUrl,
@@ -573,7 +598,7 @@ class CourseController extends Controller
                 new CourseClassScheduledMail(
                     $student,
                     $course,
-                    $data['start_time'],
+                    $scheduledAt->toIso8601String(),
                     $studentJoinUrl ?? $learnerPortalUrl,
                     $data['notes'] ?? null,
                     $learnerPortalUrl,
@@ -584,8 +609,14 @@ class CourseController extends Controller
             }
         }
 
+        $message = 'Class scheduled via Zoom API. Learners have been notified where possible.';
+        if (!empty($recordingFallback)) {
+            $message .= ' Cloud recording was unavailable on your Zoom plan, so the meeting was saved without automatic recording.';
+        }
+
         return response()->json([
-            'message' => 'Class scheduled via Zoom API. Learners have been notified where possible.',
+            'message' => $message,
+            'recording_fallback' => !empty($recordingFallback),
             'host_room_url' => $hostRoomUrl,
             'host_room_path' => $hostRoomPath,
             'learner_portal_url' => $learnerPortalUrl,

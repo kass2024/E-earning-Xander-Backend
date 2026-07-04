@@ -418,7 +418,7 @@ class InstructorDashboardController extends Controller
         $sessionsQuery = CourseMaterial::query()
             ->with('course:id,title')
             ->where('type', 'zoom')
-            ->orderByDesc('scheduled_at')
+            ->orderBy('scheduled_at')
             ->orderByDesc('created_at');
 
         if ($courseId) {
