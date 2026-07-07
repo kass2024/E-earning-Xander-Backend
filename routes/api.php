@@ -27,6 +27,8 @@ use App\Http\Controllers\Api\PlatformInstitutionController;
 use App\Http\Controllers\Api\InstitutionSignupController;
 use App\Http\Controllers\Api\PublicStorageController;
 use App\Http\Controllers\Api\LearnerDashboardController;
+use App\Http\Controllers\Api\PromoBannerController;
+use App\Http\Controllers\Api\StarPromoBannerController;
 use App\Http\Controllers\Api\StudyShiftChangeRequestController;
 use App\Http\Controllers\Api\CertificateController;
 use App\Services\ZoomService;
@@ -90,6 +92,12 @@ Route::prefix('admin')->group(function () {
     Route::post('available-schedules', [AvailableScheduleController::class, 'store']);
     Route::put('available-schedules/{availableSchedule}', [AvailableScheduleController::class, 'update']);
     Route::delete('available-schedules/{availableSchedule}', [AvailableScheduleController::class, 'destroy']);
+
+    // Site promo banner (public read + admin write)
+    Route::get('site-settings/promo-banner', [PromoBannerController::class, 'show']);
+    Route::put('site-settings/promo-banner', [PromoBannerController::class, 'update']);
+    Route::get('site-settings/star-promo-banner', [StarPromoBannerController::class, 'show']);
+    Route::put('site-settings/star-promo-banner', [StarPromoBannerController::class, 'update']);
 
     // Study shifts (learner registration)
     Route::get('study-shifts', [StudyShiftController::class, 'index']);

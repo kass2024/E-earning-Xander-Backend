@@ -23,7 +23,7 @@ class ZoomController extends Controller
         $this->mail = $mail;
     }
 
-    public function listMeetings()
+    public function listMeetings(Request $request)
     {
         $data = $this->zoom->listMeetings($this->zoom->hostUserId());
 
@@ -42,7 +42,32 @@ class ZoomController extends Controller
 
         $meetings = AdminZoomMeetingRegistry::meetingsForManagementPage($zoomMeetings);
         $meetings = $this->zoom->annotateMeetingSessionStatuses($meetings, $this->zoom->hostUserId());
-        $meetings = $this->zoom->annotateMeetingRecordings($meetings);
+
+        if ($request->boolean('include_recordings')) {
+            $endedMeetings = array_values(array_filter(
+                $meetings,
+                fn ($meeting) => is_array($meeting) && ($meeting['session_status'] ?? '') === 'ended'
+            ));
+            $annotatedEnded = $this->zoom->annotateMeetingRecordings($endedMeetings);
+            $byId = [];
+            foreach ($annotatedEnded as $meeting) {
+                if (!is_array($meeting)) {
+                    continue;
+                }
+                $id = trim((string) ($meeting['id'] ?? ''));
+                if ($id !== '') {
+                    $byId[$id] = $meeting;
+                }
+            }
+            $meetings = array_map(function ($meeting) use ($byId) {
+                if (!is_array($meeting)) {
+                    return $meeting;
+                }
+                $id = trim((string) ($meeting['id'] ?? ''));
+
+                return ($id !== '' && isset($byId[$id])) ? $byId[$id] : $meeting;
+            }, $meetings);
+        }
 
         return response()->json(array_merge(is_array($data) ? $data : [], ['meetings' => $meetings]), 200);
     }

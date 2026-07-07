@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\AvailableSchedule;
 use App\Models\MeetingRegistration;
 use App\Models\WebinarSetting;
+use App\Support\MeetingRegistrationJoinUrl;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
@@ -140,9 +141,11 @@ class MeetingRegistrationFulfillmentService
 
         $registration->save();
 
+        $sdkJoinUrl = MeetingRegistrationJoinUrl::forRegistration($registration);
+
         return [
             'ok' => (bool) ($zoom['ok'] || $effectiveJoinUrl),
-            'join_url' => $effectiveJoinUrl,
+            'join_url' => $sdkJoinUrl ?? $effectiveJoinUrl,
             'meeting_id' => $effectiveMeetingId,
             'message' => $zoom['message'] ?? null,
         ];

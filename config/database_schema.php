@@ -25,6 +25,7 @@ return [
     'livezoom_cohort_queue_entries' => ['id'],
     'instructor_payout_requests' => ['id', 'instructor_id', 'amount', 'status', 'payment_method'],
     'webinar_settings' => ['id'],
+    'site_settings' => ['id', 'promo_banner_published', 'star_banner_published'],
     'study_shifts' => ['id', 'name', 'day_of_week', 'start_time', 'end_time', 'is_active', 'platform_institution_id'],
     'course_enrollment_study_shifts' => ['id', 'course_enrollment_id', 'study_shift_id'],
     'study_shift_change_requests' => ['id', 'course_enrollment_id', 'student_id', 'course_id', 'status'],

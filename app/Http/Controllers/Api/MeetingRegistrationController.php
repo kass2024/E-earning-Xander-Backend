@@ -1147,7 +1147,7 @@ class MeetingRegistrationController extends Controller
             ProvisionMeetingRegistrationJob::dispatch($registration->id, $scheduleLabelFromForm)->afterResponse();
 
             return response()->json([
-                'message' => 'Meeting registration saved. Confirmation email with Zoom link will arrive shortly.',
+                'message' => 'Booking confirmed. A confirmation email with your meeting link will arrive shortly.',
                 'role' => $user->role,
                 'user' => $user,
                 'registration' => $registration->fresh(),

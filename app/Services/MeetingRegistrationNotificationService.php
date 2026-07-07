@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\AvailableSchedule;
 use App\Models\MeetingRegistration;
+use App\Support\MeetingRegistrationJoinUrl;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
 
@@ -42,6 +43,9 @@ class MeetingRegistrationNotificationService
                 ]);
             } elseif (strtolower($status) === 'approved') {
                 $effectiveJoinUrl = $joinUrl;
+                if (!$effectiveJoinUrl) {
+                    $effectiveJoinUrl = MeetingRegistrationJoinUrl::forRegistration($meetingRegistration);
+                }
                 if (!$effectiveJoinUrl && !empty($meetingRegistration->zoom_join_url)) {
                     $effectiveJoinUrl = $meetingRegistration->zoom_join_url;
                 }
@@ -109,8 +113,9 @@ class MeetingRegistrationNotificationService
                     'nextSession' => $nextSessionText,
                     'scheduleDescription' => $scheduleDescription,
                     'learnerNotes' => $learnerNotes,
+                    'recipientEmail' => $to,
                 ], function ($message) use ($to) {
-                    $message->to($to)->subject('Pathways Webinar Schedule & Zoom Link');
+                    $message->to($to)->subject('Your meeting is confirmed');
                 }, [
                     'event' => 'meeting_registration_approved',
                     'meeting_registration_id' => $meetingRegistration->id ?? null,
@@ -152,8 +157,8 @@ class MeetingRegistrationNotificationService
             return;
         }
 
-        $effectiveJoinUrl = null;
-        if (!empty($meetingRegistration->zoom_join_url)) {
+        $effectiveJoinUrl = MeetingRegistrationJoinUrl::forRegistration($meetingRegistration);
+        if (!$effectiveJoinUrl && !empty($meetingRegistration->zoom_join_url)) {
             $effectiveJoinUrl = $meetingRegistration->zoom_join_url;
         }
         if (!$effectiveJoinUrl && !$this->zoom->isConfigured()) {
@@ -194,7 +199,7 @@ class MeetingRegistrationNotificationService
             'nextSession' => $nextSessionText,
             'customMessage' => $message,
         ], function ($messageObj) use ($to) {
-            $messageObj->to($to)->subject('Reminder: Pathways Webinar & Zoom Link');
+            $messageObj->to($to)->subject('Reminder: Your upcoming session');
         }, [
             'event' => 'meeting_registration_reminder',
             'meeting_registration_id' => $meetingRegistration->id ?? null,
