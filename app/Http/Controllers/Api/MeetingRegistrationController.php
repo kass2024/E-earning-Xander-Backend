@@ -596,7 +596,8 @@ class MeetingRegistrationController extends Controller
     private function ensureScheduledWebinarMeeting(
         WebinarSetting $settings,
         Carbon $startAt,
-        ?AvailableSchedule $schedule
+        ?AvailableSchedule $schedule,
+        ?User $actor = null,
     ): array {
         if (!$this->zoom->isConfigured()) {
             return [
@@ -627,6 +628,18 @@ class MeetingRegistrationController extends Controller
         $startLocal = $startAt->copy()->setTimezone($tz);
         $topic = 'Pathways Webinar - ' . $startLocal->format('M j, Y g:i A');
 
+        $institutionId = !empty($schedule?->platform_institution_id)
+            ? (int) $schedule->platform_institution_id
+            : (!empty($settings->platform_institution_id) ? (int) $settings->platform_institution_id : null);
+        $poolUserId = $actor?->id
+            ? (int) $actor->id
+            : ($institutionId ? null : (int) ($schedule->id ?? 0));
+        $hostId = $this->zoom->resolveHostUserId(
+            $institutionId,
+            $poolUserId > 0 ? $poolUserId : null,
+            $actor?->email,
+        );
+
         $meeting = $this->zoom->createMeeting([
             'topic' => $topic,
             'start_time' => $startLocal->format('Y-m-d\TH:i:s'),
@@ -637,7 +650,7 @@ class MeetingRegistrationController extends Controller
             'join_before_host' => true,
             'waiting_room' => true,
             'mute_upon_entry' => true,
-        ], $this->zoom->hostUserId());
+        ], $hostId);
 
         if ($meeting === null) {
             return [
@@ -669,6 +682,7 @@ class MeetingRegistrationController extends Controller
         $settings->zoom_join_url = $joinUrl;
         $settings->zoom_start_url = $startUrl;
         $settings->zoom_scheduled_at = $startAt;
+        $this->applyWebinarHostAssignment($settings, $hostId, $institutionId);
         $this->applyWebinarMeetingSecrets($settings, $meeting);
         $settings->save();
 
@@ -686,7 +700,7 @@ class MeetingRegistrationController extends Controller
     /**
      * @return array{ok: bool, message?: string, settings?: WebinarSetting, meeting?: array}
      */
-    private function createWebinarZoomSession(WebinarSetting $settings): array
+    private function createWebinarZoomSession(WebinarSetting $settings, ?User $actor = null): array
     {
         if (!$this->zoom->isConfigured()) {
             return [
@@ -694,6 +708,15 @@ class MeetingRegistrationController extends Controller
                 'message' => 'Zoom API credentials are missing. Set ZOOM_ACCOUNT_ID, ZOOM_CLIENT_ID, and ZOOM_CLIENT_SECRET on the server.',
             ];
         }
+
+        $institutionId = !empty($settings->platform_institution_id)
+            ? (int) $settings->platform_institution_id
+            : null;
+        $hostId = $this->zoom->resolveHostUserId(
+            $institutionId,
+            $actor?->id ? (int) $actor->id : null,
+            $actor?->email,
+        );
 
         $topic = 'Pathways Webinar - ' . now()->format('Y-m-d H:i');
         $meeting = $this->zoom->createInstantMeeting([
@@ -704,7 +727,7 @@ class MeetingRegistrationController extends Controller
             'join_before_host' => false,
             'waiting_room' => true,
             'mute_upon_entry' => true,
-        ]);
+        ], $hostId);
 
         if ($meeting === null) {
             return [
@@ -739,6 +762,7 @@ class MeetingRegistrationController extends Controller
         $settings->zoom_start_url = $startUrl;
         $settings->zoom_scheduled_at = now();
         $settings->session_started_at = now();
+        $this->applyWebinarHostAssignment($settings, $hostId, $institutionId);
         $this->applyWebinarMeetingSecrets($settings, $meeting);
         $settings->save();
 
@@ -749,6 +773,16 @@ class MeetingRegistrationController extends Controller
             'settings' => $settings,
             'meeting' => $meeting,
         ];
+    }
+
+    private function applyWebinarHostAssignment(WebinarSetting $settings, string $hostId, ?int $institutionId = null): void
+    {
+        if (Schema::hasColumn('webinar_settings', 'zoom_host_user_id')) {
+            $settings->zoom_host_user_id = $hostId;
+        }
+        if ($institutionId && Schema::hasColumn('webinar_settings', 'platform_institution_id')) {
+            $settings->platform_institution_id = $institutionId;
+        }
     }
 
     /**
@@ -903,8 +937,9 @@ class MeetingRegistrationController extends Controller
         ];
     }
 
-    public function startWebinar()
+    public function startWebinar(Request $request)
     {
+        $actor = $request->user();
         $approvedCount = $this->approvedRegistrationCount();
         if ($approvedCount === 0) {
             return response()->json([
@@ -929,7 +964,7 @@ class MeetingRegistrationController extends Controller
                     ? Carbon::parse($latest->zoom_start_time)
                     : ($schedule ? $this->getNextStartFromSchedule($schedule) : $this->getNextWebinarStartTime());
 
-                $ensured = $this->ensureScheduledWebinarMeeting($settings, $startAt, $schedule);
+                $ensured = $this->ensureScheduledWebinarMeeting($settings, $startAt, $schedule, $actor);
                 if (!$ensured['ok']) {
                     return response()->json([
                         'message' => $ensured['message'] ?? 'Could not prepare the Zoom meeting.',
@@ -938,7 +973,7 @@ class MeetingRegistrationController extends Controller
                 }
                 $settings->refresh();
             } else {
-                $created = $this->createWebinarZoomSession($settings);
+                $created = $this->createWebinarZoomSession($settings, $actor);
                 if (!$created['ok']) {
                     return response()->json([
                         'message' => $created['message'] ?? 'Failed to create Zoom webinar meeting.',
@@ -1067,8 +1102,8 @@ class MeetingRegistrationController extends Controller
 
         $data = $request->validate([
             'full_name' => 'required|string|max:255',
-            'email' => 'required|email|max:255|unique:meeting_registrations,email',
-            'phone' => 'nullable|string|max:255|unique:meeting_registrations,phone',
+            'email' => 'required|email|max:255',
+            'phone' => 'nullable|string|max:255',
             'country' => 'nullable|string|max:255',
             'learner_timezone' => 'nullable|string|max:255',
             'notes' => 'nullable|string',

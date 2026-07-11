@@ -263,8 +263,10 @@ Route::prefix('admin')->group(function () {
 
     Route::post('users', [UserController::class, 'store']);
     Route::get('platform-institutions', [PlatformInstitutionController::class, 'index']);
+    Route::post('platform-institutions/backfill-zoom-hosts', [PlatformInstitutionController::class, 'backfillZoomHosts']);
     Route::get('platform-institutions/{platformInstitution}', [PlatformInstitutionController::class, 'show']);
     Route::put('platform-institutions/{platformInstitution}', [PlatformInstitutionController::class, 'update']);
+    Route::post('platform-institutions/{platformInstitution}/assign-zoom-host', [PlatformInstitutionController::class, 'assignZoomHost']);
     Route::post('platform-institutions/{platformInstitution}/test-mail', [PlatformInstitutionController::class, 'sendTestMail']);
     Route::post('platform-institutions/{platformInstitution}/approve', [PlatformInstitutionController::class, 'approve']);
     Route::post('platform-institutions/{platformInstitution}/disable', [PlatformInstitutionController::class, 'disable']);
@@ -348,6 +350,7 @@ Route::prefix('admin')->group(function () {
 
     /*** ---------------- ZOOM ---------------- ***/
     Route::get('zoom/meetings', [ZoomController::class, 'listMeetings']);
+    Route::get('zoom/hosts', [ZoomController::class, 'listHosts']);
     Route::get('zoom/embed/config', [ZoomEmbedController::class, 'config']);
     Route::post('zoom/embed/auth', [ZoomEmbedController::class, 'auth']);
     Route::post('zoom/meetings', [ZoomController::class, 'createMeeting']);

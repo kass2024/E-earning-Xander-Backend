@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Services\InstitutionSignupService;
 use App\Services\InstitutionMailResolver;
 use App\Services\MailDeliveryService;
+use App\Services\ZoomHostAssignmentService;
 use App\Support\PlatformInstitutionHelper;
 use App\Support\FrontendUrl;
 use Illuminate\Http\Request;
@@ -21,6 +22,7 @@ class PlatformInstitutionController extends Controller
         private readonly InstitutionSignupService $signupService,
         private readonly InstitutionMailResolver $mailResolver,
         private readonly MailDeliveryService $mailDelivery,
+        private readonly ZoomHostAssignmentService $zoomHostAssignment,
     ) {}
 
     public function index()
@@ -83,6 +85,8 @@ class PlatformInstitutionController extends Controller
             return response()->json(['message' => 'Institution approved but owner account could not be created: ' . $e->getMessage()], 500);
         }
 
+        $this->zoomHostAssignment->ensureInstitutionHost($platformInstitution->fresh());
+
         if ($platformInstitution->owner_user_id) {
             $ownerStatus = $platformInstitution->payment_status === 'unpaid' ? 'Unpaid' : 'Active';
             User::where('id', $platformInstitution->owner_user_id)->update(['status' => $ownerStatus]);
@@ -116,6 +120,8 @@ class PlatformInstitutionController extends Controller
         }
         $platformInstitution->save();
 
+        $this->zoomHostAssignment->ensureInstitutionHost($platformInstitution->fresh());
+
         if ($platformInstitution->owner_user_id) {
             $ownerStatus = $platformInstitution->payment_status === 'unpaid' ? 'Unpaid' : 'Active';
             User::where('id', $platformInstitution->owner_user_id)->update(['status' => $ownerStatus]);
@@ -124,6 +130,44 @@ class PlatformInstitutionController extends Controller
         return response()->json([
             'message' => 'Institution enabled',
             'institution' => $platformInstitution->fresh()->toPublicArray(),
+        ]);
+    }
+
+    public function assignZoomHost(PlatformInstitution $platformInstitution, Request $request)
+    {
+        $data = $request->validate([
+            'force' => 'sometimes|boolean',
+        ]);
+
+        $host = $this->zoomHostAssignment->assignHostToInstitution(
+            $platformInstitution->fresh(),
+            (bool) ($data['force'] ?? false),
+        );
+
+        if ($host === null || trim($host) === '') {
+            return response()->json([
+                'message' => 'No available Zoom host found. Add licensed users in Zoom Admin or set ZOOM_HOST_POOL.',
+                'inventory' => $this->zoomHostAssignment->getHostInventory((int) $platformInstitution->id),
+            ], 422);
+        }
+
+        return response()->json([
+            'message' => 'Zoom host assigned',
+            'zoom_host_user_id' => $host,
+            'institution' => $platformInstitution->fresh()->toAdminArray(),
+        ]);
+    }
+
+    public function backfillZoomHosts(Request $request)
+    {
+        $dryRun = $request->boolean('dry_run');
+        $results = $this->zoomHostAssignment->backfillMissingHosts($dryRun);
+
+        return response()->json([
+            'message' => $dryRun ? 'Preview complete' : 'Backfill complete',
+            'dry_run' => $dryRun,
+            'results' => $results,
+            'inventory' => $this->zoomHostAssignment->getHostInventory(),
         ]);
     }
 
@@ -224,6 +268,7 @@ class PlatformInstitutionController extends Controller
             'mail_from_address' => 'nullable|email|max:255',
             'mail_from_name' => 'nullable|string|max:255',
             'mail_ehlo_domain' => 'nullable|string|max:255',
+            'zoom_host_user_id' => 'nullable|string|max:255',
         ]);
 
         if (array_key_exists('mail_password', $data)) {
@@ -241,6 +286,10 @@ class PlatformInstitutionController extends Controller
 
         $platformInstitution->fill($data);
         $platformInstitution->save();
+
+        if (array_key_exists('zoom_host_user_id', $data)) {
+            app(\App\Services\ZoomService::class)->invalidateHostUserCache((int) $platformInstitution->id);
+        }
 
         return response()->json([
             'message' => 'Institution updated',

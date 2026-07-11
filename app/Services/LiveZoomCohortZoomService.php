@@ -20,8 +20,12 @@ class LiveZoomCohortZoomService
     /**
      * @return array<string, mixed>
      */
-    public function ensureZoomMeeting(LiveZoomCohort $cohort, bool $forceNew = false): array
-    {
+    public function ensureZoomMeeting(
+        LiveZoomCohort $cohort,
+        bool $forceNew = false,
+        ?int $hostUserId = null,
+        ?string $hostEmail = null,
+    ): array {
         if (!$this->zoom->isConfigured()) {
             return [
                 'ok' => false,
@@ -68,6 +72,10 @@ class LiveZoomCohortZoomService
         $timezone = (string) ($cohort->timezone ?: 'Africa/Kigali');
         $agenda = $this->buildAgenda($cohort, $dayLabel, $duration, $timezone);
 
+        $institutionId = $cohort->platform_institution_id ? (int) $cohort->platform_institution_id : null;
+        $poolUserId = $hostUserId ?? ($institutionId ? null : (int) $cohort->id);
+        $hostId = $this->zoom->resolveHostUserId($institutionId, $poolUserId, $hostEmail);
+
         $meeting = $this->zoom->createPersistentCohortMeeting([
             'topic' => $topic,
             'duration' => $duration,
@@ -77,7 +85,7 @@ class LiveZoomCohortZoomService
             'waiting_room' => false,
             'mute_upon_entry' => false,
             'auto_recording' => false,
-        ], $this->zoom->resolveHostUserId());
+        ], $hostId);
 
         if ($meeting === null) {
             return [
@@ -115,6 +123,9 @@ class LiveZoomCohortZoomService
         }
         if (Schema::hasColumn('livezoom_cohort', 'zoom_password')) {
             $cohort->zoom_password = $password;
+        }
+        if (Schema::hasColumn('livezoom_cohort', 'zoom_host_user_id')) {
+            $cohort->zoom_host_user_id = $hostId;
         }
         if (Schema::hasColumn('livezoom_cohort', 'zoom_description')) {
             $cohort->zoom_description = $description;

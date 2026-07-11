@@ -85,8 +85,23 @@ class ZoomEmbedController extends Controller
         if ($userName === '') {
             $userName = $role === 1 ? 'Host' : 'Guest';
         }
+
+        $platformInstitutionId = isset($data['platform_institution_id'])
+            ? (int) $data['platform_institution_id']
+            : null;
+        $actorEmail = trim((string) ($data['user_email'] ?? $data['instructor_email'] ?? ''));
+        $actorEmail = $actorEmail !== '' ? $actorEmail : null;
+        $actorUser = $actorEmail
+            ? User::query()->whereRaw('LOWER(email) = ?', [strtolower(trim($actorEmail))])->first()
+            : null;
+
         if ($role === 1) {
-            $userName = $this->resolveZoomHostJoinName($userName);
+            $userName = $this->resolveZoomHostJoinName(
+                $userName,
+                $platformInstitutionId,
+                $actorUser?->id ? (int) $actorUser->id : null,
+                $actorEmail,
+            );
         }
 
         $joinPasswords = $this->resolveSdkJoinPasswords($meetingNumber, $data['password'] ?? null);
@@ -109,16 +124,12 @@ class ZoomEmbedController extends Controller
 
         $payload['password_candidates'] = $joinPasswords['candidates'];
 
-        $platformInstitutionId = isset($data['platform_institution_id'])
-            ? (int) $data['platform_institution_id']
-            : null;
-        $actorEmail = trim((string) ($data['user_email'] ?? $data['instructor_email'] ?? ''));
-        $actorEmail = $actorEmail !== '' ? $actorEmail : null;
-        $zoomHost = $this->zoomService->resolveConfiguredHostBranding();
+        $zoomHost = $this->zoomService->resolveConfiguredHostBranding(
+            $platformInstitutionId,
+            $actorUser?->id ? (int) $actorUser->id : null,
+            $actorEmail,
+        );
         $branding = $this->meetingBrandingPayload($actorEmail, $platformInstitutionId);
-        $actorUser = $actorEmail
-            ? User::query()->whereRaw('LOWER(email) = ?', [strtolower(trim($actorEmail))])->first()
-            : null;
         $branding = $this->brandingResolver->finalizeHostSdkBranding(
             $branding,
             $zoomHost,
@@ -209,7 +220,6 @@ class ZoomEmbedController extends Controller
                 return response()->json(['message' => 'You are not authorized to host this session.'], 403);
             }
 
-            $zoomHost = $this->zoomService->resolveConfiguredHostBranding();
             $userName = trim((string) ($instructor->name ?? '')) ?: 'Instructor';
             $participantAvatar = !empty($instructor->avatar) ? (string) $instructor->avatar : null;
             $joinUserEmail = $email !== '' ? $email : null;
@@ -302,7 +312,11 @@ class ZoomEmbedController extends Controller
             }
         }
 
-        $zoomHost = $this->zoomService->resolveConfiguredHostBranding();
+        $zoomHost = $this->zoomService->resolveConfiguredHostBranding(
+            $platformInstitutionId,
+            $actorUser?->id ? (int) $actorUser->id : null,
+            $actorEmail,
+        );
         $branding = $this->meetingBrandingPayload($actorEmail, $platformInstitutionId);
         $branding = $this->brandingResolver->finalizeHostSdkBranding(
             $branding,
@@ -312,8 +326,13 @@ class ZoomEmbedController extends Controller
 
         if ($role === 1 && ($branding['use_institution_logo'] ?? false)) {
             $userName = $this->institutionHostJoinName($branding);
-        } elseif ($role === 1 && $actorUser && PlatformInstitutionHelper::isMainPlatformAdmin($actorUser)) {
-            $userName = $this->resolveZoomHostJoinName($userName);
+        } elseif ($role === 1) {
+            $userName = $this->resolveZoomHostJoinName(
+                $userName,
+                $platformInstitutionId,
+                $actorUser?->id ? (int) $actorUser->id : null,
+                $actorEmail,
+            );
         }
 
         try {
@@ -366,18 +385,31 @@ class ZoomEmbedController extends Controller
             return response()->json(['message' => 'No webinar meeting configured. Prepare the webinar first.'], 422);
         }
 
-        $zoomHost = $this->zoomService->resolveConfiguredHostBranding();
-        $userName = $this->resolveZoomHostJoinName($data['user_name'] ?? null);
-
         $platformInstitutionId = isset($data['platform_institution_id'])
             ? (int) $data['platform_institution_id']
-            : null;
+            : ($settings->platform_institution_id ? (int) $settings->platform_institution_id : null);
+        $storedHost = trim((string) ($settings->zoom_host_user_id ?? ''));
         $actorEmail = trim((string) ($data['user_email'] ?? $data['instructor_email'] ?? ''));
         $actorEmail = $actorEmail !== '' ? $actorEmail : null;
-        $branding = $this->meetingBrandingPayload($actorEmail, $platformInstitutionId);
+        if ($storedHost !== '' && str_contains($storedHost, '@')) {
+            $actorEmail = $storedHost;
+        }
         $actorUser = $actorEmail
             ? User::query()->whereRaw('LOWER(email) = ?', [strtolower(trim($actorEmail))])->first()
             : null;
+        $zoomHost = $this->zoomService->resolveConfiguredHostBranding(
+            $platformInstitutionId,
+            $actorUser?->id ? (int) $actorUser->id : null,
+            $actorEmail,
+        );
+        $userName = $this->resolveZoomHostJoinName(
+            $data['user_name'] ?? null,
+            $platformInstitutionId,
+            $actorUser?->id ? (int) $actorUser->id : null,
+            $actorEmail,
+        );
+
+        $branding = $this->meetingBrandingPayload($actorEmail, $platformInstitutionId);
         $branding = $this->brandingResolver->finalizeHostSdkBranding(
             $branding,
             $zoomHost,
@@ -548,9 +580,17 @@ class ZoomEmbedController extends Controller
         }
     }
 
-    protected function resolveZoomHostJoinName(?string $fallback = null): string
-    {
-        $zoomName = trim((string) ($this->zoomService->resolveConfiguredHostBranding()['name'] ?? ''));
+    protected function resolveZoomHostJoinName(
+        ?string $fallback = null,
+        ?int $platformInstitutionId = null,
+        ?int $platformUserId = null,
+        ?string $actorEmail = null,
+    ): string {
+        $zoomName = trim((string) ($this->zoomService->resolveConfiguredHostBranding(
+            $platformInstitutionId,
+            $platformUserId,
+            $actorEmail,
+        )['name'] ?? ''));
         if ($zoomName !== '') {
             return $zoomName;
         }

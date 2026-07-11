@@ -137,7 +137,7 @@ class AvailableScheduleController extends Controller
 
         $data = $this->syncDayOfWeek($data);
 
-        $data['timezone'] = $data['timezone'] ?? 'Africa/Kigali';
+        $data['timezone'] = $data['timezone'] ?? 'Africa/Nairobi';
         $data['meeting_duration_minutes'] = (int) ($data['meeting_duration_minutes'] ?? 60);
         $data['is_active'] = array_key_exists('is_active', $data) ? (bool) $data['is_active'] : true;
 
@@ -167,7 +167,7 @@ class AvailableScheduleController extends Controller
             'notes' => 'nullable|string|max:2000',
         ]);
 
-        $timezone = $data['timezone'] ?? 'Africa/Kigali';
+        $timezone = $data['timezone'] ?? 'Africa/Nairobi';
         $duration = (int) ($data['meeting_duration_minutes'] ?? 60);
         $isActive = array_key_exists('is_active', $data) ? (bool) $data['is_active'] : true;
         $notes = $data['notes'] ?? null;

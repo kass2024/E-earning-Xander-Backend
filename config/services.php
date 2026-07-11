@@ -41,6 +41,10 @@ return [
         'client_id' => env('ZOOM_CLIENT_ID'),
         'client_secret' => env('ZOOM_CLIENT_SECRET'),
         'host_user_id' => env('ZOOM_HOST_USER_ID', 'me'),
+        // Comma-separated licensed Zoom host emails on the same account (one per partner institution when auto-assigned).
+        'host_pool' => env('ZOOM_HOST_POOL', ''),
+        // Licensed hosts for main-platform admins, staff, and instructors (concurrent with institutions).
+        'platform_host_pool' => env('ZOOM_PLATFORM_HOST_POOL', ''),
         // App #2 — General app / Embed (Meeting SDK JWT signatures only; never used for REST)
         'embed_client_id' => env('ZOOM_EMBED_CLIENT_ID', env('ZOOM_SDK_KEY', '')),
         'embed_client_secret' => env('ZOOM_EMBED_CLIENT_SECRET', env('ZOOM_SDK_SECRET', '')),

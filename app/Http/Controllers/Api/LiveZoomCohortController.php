@@ -513,8 +513,15 @@ class LiveZoomCohortController extends Controller
         try {
             $this->assertZoomProductionReady();
 
+            $hostEmail = PlatformTenantScope::resolveActorEmail($request) ?: trim((string) $request->input('host_email', ''));
+
             if (($liveZoomCohort->session_status ?? 'idle') !== 'live') {
-                $zoom = $this->zoomService->ensureZoomMeeting($liveZoomCohort);
+                $zoom = $this->zoomService->ensureZoomMeeting(
+                    $liveZoomCohort,
+                    false,
+                    null,
+                    $hostEmail !== '' ? $hostEmail : null,
+                );
                 if (empty($zoom['ok'])) {
                     return response()->json(['message' => $zoom['message'] ?? 'Could not prepare Zoom meeting.'], 422);
                 }
@@ -531,14 +538,22 @@ class LiveZoomCohortController extends Controller
             }
 
             if ($request->boolean('force_refresh') || $request->boolean('refresh_host_profile')) {
-                $this->zoomApi->invalidateHostUserCache();
+                $institutionId = $liveZoomCohort->platform_institution_id
+                    ? (int) $liveZoomCohort->platform_institution_id
+                    : null;
+                $actorUser = $request->user();
+                $this->zoomApi->invalidateHostUserCache(
+                    $institutionId,
+                    $actorUser?->id ? (int) $actorUser->id : null,
+                    $hostEmail !== '' ? $hostEmail : $actorUser?->email,
+                );
             }
 
             if (trim((string) ($liveZoomCohort->zoom_meeting_id ?? '')) === '') {
                 return response()->json(['message' => 'Start the cohort session first to create a Zoom meeting.'], 422);
             }
 
-            $hostContext = $this->resolveHostContext($request);
+            $hostContext = $this->resolveHostContext($request, $liveZoomCohort);
 
             $password = $this->zoomApi->resolveMeetingPassword(
                 $liveZoomCohort,
@@ -806,9 +821,16 @@ class LiveZoomCohortController extends Controller
      *
      * @return array{name: string, email: string|null, avatar_url: string|null}
      */
-    protected function resolveMeetingHostBranding(): array
+    protected function resolveMeetingHostBranding(?LiveZoomCohort $cohort = null): array
     {
-        return $this->zoomApi->resolveConfiguredHostBranding();
+        $storedHost = trim((string) ($cohort?->zoom_host_user_id ?? ''));
+        if ($storedHost !== '' && str_contains($storedHost, '@')) {
+            return $this->zoomApi->resolveConfiguredHostBranding(null, null, $storedHost);
+        }
+
+        $institutionId = $cohort?->platform_institution_id ? (int) $cohort->platform_institution_id : null;
+
+        return $this->zoomApi->resolveConfiguredHostBranding($institutionId);
     }
 
     /**
@@ -816,7 +838,7 @@ class LiveZoomCohortController extends Controller
      *
      * @return array{name: string, email: string|null, avatar_url: string|null, company_name: string}
      */
-    protected function resolveHostContext(Request $request): array
+    protected function resolveHostContext(Request $request, ?LiveZoomCohort $cohort = null): array
     {
         $request->validate([
             'host_email' => 'nullable|email|max:255',
@@ -827,7 +849,12 @@ class LiveZoomCohortController extends Controller
             ? User::query()->where('email', $hostEmail)->first()
             : $request->user();
 
-        $zoomHost = $this->zoomApi->resolveConfiguredHostBranding();
+        $institutionId = $cohort?->platform_institution_id ? (int) $cohort->platform_institution_id : null;
+        $zoomHost = $this->zoomApi->resolveConfiguredHostBranding(
+            $institutionId,
+            $user?->id ? (int) $user->id : null,
+            $hostEmail !== '' ? $hostEmail : $user?->email,
+        );
 
         $zoomName = trim((string) ($zoomHost['name'] ?? ''));
         $requestedName = trim((string) $request->input('host_name', ''));

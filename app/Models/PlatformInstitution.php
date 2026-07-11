@@ -18,6 +18,7 @@ class PlatformInstitution extends Model
         'mail_encryption', 'mail_from_address', 'mail_from_name', 'mail_ehlo_domain',
         'portal_tagline', 'portal_hero_title', 'portal_hero_subtitle', 'portal_about',
         'portal_primary_color', 'portal_features', 'portal_hero_image_path', 'portal_cta_label',
+        'zoom_host_user_id',
     ];
 
     protected $hidden = [
@@ -148,6 +149,7 @@ class PlatformInstitution extends Model
             'mail_from_address' => $this->mail_from_address,
             'mail_from_name' => $this->mail_from_name,
             'portal' => $this->portalContentPayload(),
+            'zoom_host_user_id' => $this->zoom_host_user_id,
         ];
     }
 

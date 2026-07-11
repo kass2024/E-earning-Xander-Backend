@@ -27,9 +27,15 @@ class ZoomMeetingBrandingResolver
         ?int $platformInstitutionId = null,
         ?LiveZoomCohort $cohort = null,
     ): array {
-        $zoomHost = $this->zoomService->resolveConfiguredHostBranding();
         $institution = $this->resolveInstitution($actorEmail, $platformInstitutionId, $cohort);
         $useInstitutionBranding = $this->shouldUseInstitutionBranding($actorEmail, $institution, $cohort, $platformInstitutionId);
+        $brandingInstitutionId = $institution?->id ?? $platformInstitutionId;
+        $actorUser = $this->resolveActorUser($actorEmail);
+        $zoomHost = $this->zoomService->resolveConfiguredHostBranding(
+            $brandingInstitutionId ? (int) $brandingInstitutionId : null,
+            $actorUser?->id ? (int) $actorUser->id : null,
+            $actorEmail,
+        );
 
         $companyName = $this->platformCompanyName();
         $avatarUrl = $zoomHost['avatar_url'];

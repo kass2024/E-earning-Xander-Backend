@@ -154,11 +154,20 @@ class StudyShiftController extends Controller
         $data = $this->validatedPayload($request, false, $actor);
         $courseIds = $this->extractCourseIds($data);
         $days = $data['days_of_week'] ?? null;
-        unset($data['days_of_week'], $data['course_ids']);
+        $timeSlots = $this->normalizeTimeSlots($data);
+        unset($data['days_of_week'], $data['course_ids'], $data['time_slots']);
 
-        if ($this->isInstructor($actor) && $courseIds === []) {
+        if ($this->isInstructor($actor)) {
+            if ($courseIds === []) {
+                return response()->json([
+                    'message' => 'Instructors must assign a study shift to at least one of their courses.',
+                ], 422);
+            }
+        }
+
+        if (count($courseIds) > 1) {
             return response()->json([
-                'message' => 'Instructors must assign a study shift to at least one of their courses.',
+                'message' => 'Assign only one course per availability block.',
             ], 422);
         }
 
@@ -181,16 +190,29 @@ class StudyShiftController extends Controller
 
         $created = [];
         foreach ($dayList as $day) {
-            $shift = StudyShift::create([
-                ...$data,
-                'day_of_week' => $day,
-                'created_by' => $actor->id,
-                'platform_institution_id' => $this->resolveShiftInstitutionId($data['course_id'] ?? null, $actor),
-            ]);
-            $provisioning->syncShiftCourses($shift, $courseIds);
-            $shift->load(['course:id,title', 'courses:id,title', 'creator:id,name,email,role']);
-            $shift->loadCount('enrollmentLinks');
-            $created[] = $this->serializeShift($shift, $actor);
+            foreach ($timeSlots as $slot) {
+                $this->assertInstructorSlotCourseExclusive(
+                    $actor,
+                    $day,
+                    $slot['start_time'],
+                    $slot['end_time'],
+                    $courseIds
+                );
+
+                $shift = StudyShift::create([
+                    ...$data,
+                    'name' => $slot['name'],
+                    'start_time' => $slot['start_time'],
+                    'end_time' => $slot['end_time'],
+                    'day_of_week' => $day,
+                    'created_by' => $actor->id,
+                    'platform_institution_id' => $this->resolveShiftInstitutionId($data['course_id'] ?? null, $actor),
+                ]);
+                $provisioning->syncShiftCourses($shift, $courseIds);
+                $shift->load(['course:id,title', 'courses:id,title', 'creator:id,name,email,role']);
+                $shift->loadCount('enrollmentLinks');
+                $created[] = $this->serializeShift($shift, $actor);
+            }
         }
 
         $count = count($created);
@@ -217,7 +239,13 @@ class StudyShiftController extends Controller
 
         $data = $this->validatedPayload($request, true, $actor);
         $courseIds = $this->extractCourseIds($data, $studyShift);
-        unset($data['course_ids']);
+        unset($data['course_ids'], $data['time_slots']);
+
+        if (count($courseIds) > 1) {
+            return response()->json([
+                'message' => 'Assign only one course per availability block.',
+            ], 422);
+        }
 
         foreach ($courseIds as $courseId) {
             if (!$this->canManageCourse($actor, $courseId)) {
@@ -228,6 +256,11 @@ class StudyShiftController extends Controller
         if (array_key_exists('course_id', $data) && $data['course_id'] && !$this->canManageCourse($actor, $data['course_id'])) {
             return response()->json(['message' => 'You cannot assign this shift to that course.'], 403);
         }
+
+        $day = (int) ($data['day_of_week'] ?? $studyShift->day_of_week);
+        $start = substr((string) ($data['start_time'] ?? $studyShift->start_time), 0, 5);
+        $end = substr((string) ($data['end_time'] ?? $studyShift->end_time), 0, 5);
+        $this->assertInstructorSlotCourseExclusive($actor, $day, $start, $end, $courseIds, $studyShift->id);
 
         $studyShift->update($data);
         if ($request->has('course_ids') || $request->has('course_id')) {
@@ -272,8 +305,12 @@ class StudyShiftController extends Controller
             'day_of_week' => ($partial ? 'sometimes|' : '') . 'nullable|integer|min:0|max:6',
             'days_of_week' => ($partial ? 'sometimes|' : '') . 'nullable|array|min:1',
             'days_of_week.*' => 'integer|min:0|max:6',
-            'start_time' => ($partial ? 'sometimes|' : '') . 'required|string|max:8',
-            'end_time' => ($partial ? 'sometimes|' : '') . 'required|string|max:8',
+            'start_time' => ($partial ? 'sometimes|' : '') . 'required_without:time_slots|string|max:8',
+            'end_time' => ($partial ? 'sometimes|' : '') . 'required_without:time_slots|string|max:8',
+            'time_slots' => ($partial ? 'sometimes|' : '') . 'nullable|array|min:1',
+            'time_slots.*.name' => 'required_with:time_slots|string|max:120',
+            'time_slots.*.start_time' => 'required_with:time_slots|string|max:8',
+            'time_slots.*.end_time' => 'required_with:time_slots|string|max:8',
             'timezone' => ($partial ? 'sometimes|' : '') . 'required|string|max:64',
             'max_students' => 'nullable|integer|min:1|max:500',
             'is_active' => 'nullable|boolean',
@@ -288,6 +325,24 @@ class StudyShiftController extends Controller
             throw \Illuminate\Validation\ValidationException::withMessages([
                 'days_of_week' => ['Select at least one day of the week.'],
             ]);
+        }
+
+        if (!$partial && empty($data['time_slots']) && (empty($data['start_time']) || empty($data['end_time']))) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'time_slots' => ['Add at least one time slot.'],
+            ]);
+        }
+
+        if (isset($data['time_slots']) && is_array($data['time_slots'])) {
+            foreach ($data['time_slots'] as $index => $slot) {
+                $start = substr((string) ($slot['start_time'] ?? ''), 0, 5);
+                $end = substr((string) ($slot['end_time'] ?? ''), 0, 5);
+                if ($this->timeToMinutes($end) <= $this->timeToMinutes($start)) {
+                    throw \Illuminate\Validation\ValidationException::withMessages([
+                        "time_slots.{$index}.end_time" => ['End time must be after start time.'],
+                    ]);
+                }
+            }
         }
 
         if (isset($data['start_time'])) {
@@ -514,5 +569,109 @@ class StudyShiftController extends Controller
         }
 
         return null;
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return array<int, array{name: string, start_time: string, end_time: string}>
+     */
+    private function normalizeTimeSlots(array $data): array
+    {
+        if (!empty($data['time_slots']) && is_array($data['time_slots'])) {
+            return array_values(array_map(function (array $slot) {
+                return [
+                    'name' => trim((string) ($slot['name'] ?? 'Study shift')),
+                    'start_time' => substr((string) ($slot['start_time'] ?? '09:00'), 0, 5),
+                    'end_time' => substr((string) ($slot['end_time'] ?? '11:00'), 0, 5),
+                ];
+            }, $data['time_slots']));
+        }
+
+        return [[
+            'name' => trim((string) ($data['name'] ?? 'Study shift')),
+            'start_time' => substr((string) ($data['start_time'] ?? '09:00'), 0, 5),
+            'end_time' => substr((string) ($data['end_time'] ?? '11:00'), 0, 5),
+        ]];
+    }
+
+    /**
+     * @return array<int, int>
+     */
+    private function shiftLinkedCourseIds(StudyShift $shift): array
+    {
+        $fromPivot = $shift->relationLoaded('courses')
+            ? $shift->courses->pluck('id')->map(fn ($id) => (int) $id)->all()
+            : $shift->courses()->pluck('courses.id')->map(fn ($id) => (int) $id)->all();
+
+        if ($fromPivot !== []) {
+            return $fromPivot;
+        }
+
+        return $shift->course_id ? [(int) $shift->course_id] : [];
+    }
+
+    /**
+     * Instructors cannot assign two different courses to the same day + time block.
+     *
+     * @param array<int, int> $courseIds
+     */
+    private function assertInstructorSlotCourseExclusive(
+        User $actor,
+        int $day,
+        string $start,
+        string $end,
+        array $courseIds,
+        ?int $excludeShiftId = null
+    ): void {
+        if (!$this->isInstructor($actor)) {
+            return;
+        }
+
+        $newCourseId = $courseIds[0] ?? null;
+        if (!$newCourseId) {
+            return;
+        }
+
+        $start = substr($start, 0, 5);
+        $end = substr($end, 0, 5);
+        $instructorCourseIds = $this->instructorCourseIds($actor);
+        $managedIds = $instructorCourseIds->isEmpty() ? [-1] : $instructorCourseIds->all();
+
+        $existing = StudyShift::query()
+            ->where('day_of_week', $day)
+            ->whereRaw('substr(start_time, 1, 5) = ?', [$start])
+            ->whereRaw('substr(end_time, 1, 5) = ?', [$end])
+            ->where(function ($q) use ($actor, $managedIds) {
+                $q->where('created_by', $actor->id)
+                    ->orWhereIn('course_id', $managedIds)
+                    ->orWhereHas('courses', fn ($sub) => $sub->whereIn('courses.id', $managedIds));
+            })
+            ->when($excludeShiftId, fn ($q) => $q->where('id', '!=', $excludeShiftId))
+            ->with('courses:id,title')
+            ->get();
+
+        foreach ($existing as $shift) {
+            $linked = $this->shiftLinkedCourseIds($shift);
+            if ($linked === []) {
+                continue;
+            }
+
+            if (!in_array($newCourseId, $linked, true)) {
+                $dayLabel = self::DAY_NAMES[$day] ?? 'Day';
+                $otherCourse = $shift->courses->first()?->title ?? $shift->course?->title ?? 'another course';
+
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'start_time' => [
+                        sprintf(
+                            'You already have %s on %s at %s–%s. Each time slot can only be assigned to one of your courses.',
+                            $otherCourse,
+                            $dayLabel,
+                            $start,
+                            $end
+                        ),
+                    ],
+                ]);
+            }
+        }
     }
 }

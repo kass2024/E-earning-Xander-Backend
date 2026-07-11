@@ -275,6 +275,15 @@ class MeetingRegistrationFulfillmentService
         $startLocal = $startAt->copy()->setTimezone($tz);
         $topic = 'Pathways Webinar - ' . $startLocal->format('M j, Y g:i A');
 
+        $institutionId = !empty($schedule->platform_institution_id)
+            ? (int) $schedule->platform_institution_id
+            : null;
+        $hostId = $this->zoom->resolveHostUserId(
+            $institutionId,
+            $institutionId ? null : (int) ($schedule->id ?? 0),
+            null,
+        );
+
         $meeting = $this->zoom->createMeeting([
             'topic' => $topic,
             'start_time' => $startLocal->format('Y-m-d\TH:i:s'),
@@ -285,7 +294,7 @@ class MeetingRegistrationFulfillmentService
             'join_before_host' => true,
             'waiting_room' => true,
             'mute_upon_entry' => true,
-        ], $this->zoom->hostUserId());
+        ], $hostId);
 
         if ($meeting === null) {
             return [
@@ -317,6 +326,9 @@ class MeetingRegistrationFulfillmentService
         $settings->zoom_join_url = $joinUrl;
         $settings->zoom_start_url = $startUrl;
         $settings->zoom_scheduled_at = $startAt;
+        if (\Illuminate\Support\Facades\Schema::hasColumn('webinar_settings', 'zoom_host_user_id')) {
+            $settings->zoom_host_user_id = $hostId;
+        }
         $settings->save();
 
         $this->syncApprovedRegistrationZoomLinks($joinUrl, $meetingId);

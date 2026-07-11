@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\CourseMaterial;
 use App\Models\LiveZoomCohort;
+use App\Models\User;
 use App\Models\WebinarSetting;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -95,12 +96,21 @@ class ZoomService
         return ['ok' => true, 'message' => null];
     }
 
-    public function invalidateHostUserCache(): void
+    public function invalidateHostUserCache(
+        ?int $platformInstitutionId = null,
+        ?int $platformUserId = null,
+        ?string $actorEmail = null,
+    ): void {
+        Cache::forget($this->hostUserCacheKey($platformInstitutionId, $platformUserId, $actorEmail));
+        Cache::forget($this->configuredHostBrandingCacheKey($platformInstitutionId, $platformUserId, $actorEmail));
+        if ($platformInstitutionId === null && $platformUserId === null && $actorEmail === null) {
+            Cache::forget('zoom_resolved_host_user_id_v1');
+        }
+    }
+
+    protected function hostResolver(): ZoomHostResolver
     {
-        Cache::forget($this->hostUserCacheKey());
-        Cache::forget('zoom_resolved_host_user_id_v1');
-        Cache::forget($this->userProfilePictureCacheKey());
-        Cache::forget($this->configuredHostBrandingCacheKey());
+        return app(ZoomHostResolver::class);
     }
 
     protected function userProfilePictureCacheKey(?string $emailOrId = null): string
@@ -110,9 +120,15 @@ class ZoomService
         return 'zoom_user_pic_url_v1_' . md5($key !== '' ? $key : '__default__');
     }
 
-    protected function configuredHostBrandingCacheKey(): string
-    {
-        return 'zoom_host_brand_profile_v2_' . md5(strtolower(trim($this->hostUserId())));
+    protected function configuredHostBrandingCacheKey(
+        ?int $platformInstitutionId = null,
+        ?int $platformUserId = null,
+        ?string $actorEmail = null,
+    ): string {
+        $configured = $this->hostResolver()->configuredHostEmail($platformInstitutionId, $platformUserId, $actorEmail);
+        $suffix = $this->hostContextSuffix($platformInstitutionId, $platformUserId, $actorEmail);
+
+        return 'zoom_host_brand_profile_v4_' . $suffix . '_' . md5(strtolower(trim($configured)));
     }
 
     /**
@@ -137,15 +153,21 @@ class ZoomService
     }
 
     /**
-     * Branding for the Zoom meeting host from ZOOM_HOST_USER_ID (.env) — not the CMS login user.
+     * Branding for the Zoom meeting host — per institution when assigned, else platform default.
      *
      * @return array{name: string, email: string|null, avatar_url: string|null}
      */
-    public function resolveConfiguredHostBranding(): array
-    {
-        return Cache::remember($this->configuredHostBrandingCacheKey(), 3600, function () {
-            $configured = trim($this->hostUserId());
-            $profile = $this->fetchConfiguredZoomHostProfile();
+    public function resolveConfiguredHostBranding(
+        ?int $platformInstitutionId = null,
+        ?int $platformUserId = null,
+        ?string $actorEmail = null,
+    ): array {
+        return Cache::remember(
+            $this->configuredHostBrandingCacheKey($platformInstitutionId, $platformUserId, $actorEmail),
+            3600,
+            function () use ($platformInstitutionId, $platformUserId, $actorEmail) {
+            $configured = trim($this->hostResolver()->configuredHostEmail($platformInstitutionId, $platformUserId, $actorEmail));
+            $profile = $this->fetchConfiguredZoomHostProfile($configured);
 
             $name = '';
             $email = null;
@@ -178,14 +200,14 @@ class ZoomService
     /**
      * @return array<string, mixed>|null
      */
-    protected function fetchConfiguredZoomHostProfile(): ?array
+    protected function fetchConfiguredZoomHostProfile(?string $configuredEmail = null): ?array
     {
         $client = $this->client();
         if (!$client) {
             return null;
         }
 
-        $configured = trim($this->hostUserId());
+        $configured = trim($configuredEmail ?? $this->hostUserId());
         if ($configured === '' || $configured === 'me') {
             return null;
         }
@@ -247,6 +269,96 @@ class ZoomService
         return null;
     }
 
+    /**
+     * Licensed (and on-prem) Zoom users on this account — used for automatic institution host assignment.
+     *
+     * Requires S2S scope: user:read:list_users:admin
+     *
+     * @return list<array{id: string|null, email: string, display_name: string, type: int|null}>
+     */
+    public function listLicensedAccountUsers(bool $refresh = false): array
+    {
+        $cacheKey = 'zoom:licensed_account_users_v1';
+
+        if (!$refresh) {
+            $cached = Cache::get($cacheKey);
+            if (is_array($cached)) {
+                return $cached;
+            }
+        }
+
+        $client = $this->client();
+        if (!$client) {
+            return [];
+        }
+
+        $users = [];
+        $page = 1;
+        $pageCount = 1;
+
+        do {
+            $response = $client->get('/users', [
+                'status' => 'active',
+                'page_size' => 300,
+                'page_number' => $page,
+            ]);
+
+            if (!$response->successful()) {
+                break;
+            }
+
+            $batch = $response->json('users');
+            if (!is_array($batch)) {
+                break;
+            }
+
+            foreach ($batch as $user) {
+                if (!is_array($user)) {
+                    continue;
+                }
+
+                $type = (int) ($user['type'] ?? 0);
+                if (!in_array($type, [2, 3], true)) {
+                    continue;
+                }
+
+                $email = trim((string) ($user['email'] ?? ''));
+                if ($email === '') {
+                    continue;
+                }
+
+                $first = trim((string) ($user['first_name'] ?? ''));
+                $last = trim((string) ($user['last_name'] ?? ''));
+                $displayName = trim($first . ' ' . $last);
+
+                $users[$this->normalizeZoomHostEmail($email)] = [
+                    'id' => isset($user['id']) ? (string) $user['id'] : null,
+                    'email' => $email,
+                    'display_name' => $displayName,
+                    'type' => $type,
+                ];
+            }
+
+            $pageCount = max(1, (int) $response->json('page_count'));
+            $page++;
+        } while ($page <= $pageCount);
+
+        $users = array_values($users);
+        Cache::put($cacheKey, $users, 900);
+
+        return $users;
+    }
+
+    public function invalidateLicensedAccountUsersCache(): void
+    {
+        Cache::forget('zoom:licensed_account_users_v1');
+    }
+
+    protected function normalizeZoomHostEmail(string $email): string
+    {
+        return strtolower(trim($email));
+    }
+
     public function resolveUserProfilePicture(?string $emailOrId = null): ?string
     {
         if ($emailOrId === null || trim($emailOrId) === '') {
@@ -270,9 +382,27 @@ class ZoomService
         });
     }
 
-    protected function hostUserCacheKey(): string
-    {
-        return 'zoom_resolved_host_user_id_v2_' . md5(trim($this->hostUserId()));
+    protected function hostUserCacheKey(
+        ?int $platformInstitutionId = null,
+        ?int $platformUserId = null,
+        ?string $actorEmail = null,
+    ): string {
+        $configured = $this->hostResolver()->configuredHostEmail($platformInstitutionId, $platformUserId, $actorEmail);
+        $suffix = $this->hostContextSuffix($platformInstitutionId, $platformUserId, $actorEmail);
+
+        return 'zoom_resolved_host_user_id_v4_' . $suffix . '_' . md5(trim($configured));
+    }
+
+    protected function hostContextSuffix(
+        ?int $platformInstitutionId = null,
+        ?int $platformUserId = null,
+        ?string $actorEmail = null,
+    ): string {
+        return md5(json_encode([
+            $platformInstitutionId,
+            $platformUserId,
+            strtolower(trim((string) $actorEmail)),
+        ]));
     }
 
     protected function client()
@@ -663,13 +793,15 @@ class ZoomService
     }
 
     /**
-     * Resolve the Zoom user id used for meeting creation and ZAK requests.
-     * Avoids "me" because it breaks ZAK + embedded host start in some SDK builds.
+     * Resolve the Zoom user id used for meeting creation and SDK host auth.
      */
-    public function resolveHostUserId(): string
-    {
-        $configured = trim($this->hostUserId());
-        $cacheKey = $this->hostUserCacheKey();
+    public function resolveHostUserId(
+        ?int $platformInstitutionId = null,
+        ?int $platformUserId = null,
+        ?string $actorEmail = null,
+    ): string {
+        $configured = trim($this->hostResolver()->configuredHostEmail($platformInstitutionId, $platformUserId, $actorEmail));
+        $cacheKey = $this->hostUserCacheKey($platformInstitutionId, $platformUserId, $actorEmail);
 
         $cached = Cache::get($cacheKey);
         if (is_string($cached) && $cached !== '' && $this->zoomHostUserExists($cached)) {
@@ -684,6 +816,15 @@ class ZoomService
         Cache::put($cacheKey, $resolved, 3600);
 
         return $resolved;
+    }
+
+    public function resolveHostUserIdForActor(?int $platformInstitutionId, ?User $user): string
+    {
+        return $this->resolveHostUserId(
+            $platformInstitutionId,
+            $user?->id ? (int) $user->id : null,
+            $user?->email,
+        );
     }
 
     protected function resolveHostUserIdFresh(string $configured): string

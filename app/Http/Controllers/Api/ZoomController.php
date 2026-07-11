@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Services\MailDeliveryService;
+use App\Services\ZoomHostAssignmentService;
+use App\Services\ZoomHostResolver;
 use App\Services\ZoomService;
 use App\Support\AdminRecordingCatalog;
 use App\Support\AdminZoomMeetingRegistry;
@@ -25,7 +27,11 @@ class ZoomController extends Controller
 
     public function listMeetings(Request $request)
     {
-        $data = $this->zoom->listMeetings($this->zoom->hostUserId());
+        $institutionId = $request->filled('platform_institution_id')
+            ? (int) $request->input('platform_institution_id')
+            : null;
+        $hostUser = $this->zoom->resolveHostUserId($institutionId);
+        $data = $this->zoom->listMeetings($hostUser);
 
         if ($data === null) {
             return response()->json([
@@ -41,7 +47,7 @@ class ZoomController extends Controller
         }
 
         $meetings = AdminZoomMeetingRegistry::meetingsForManagementPage($zoomMeetings);
-        $meetings = $this->zoom->annotateMeetingSessionStatuses($meetings, $this->zoom->hostUserId());
+        $meetings = $this->zoom->annotateMeetingSessionStatuses($meetings, $hostUser);
 
         if ($request->boolean('include_recordings')) {
             $endedMeetings = array_values(array_filter(
@@ -70,6 +76,15 @@ class ZoomController extends Controller
         }
 
         return response()->json(array_merge(is_array($data) ? $data : [], ['meetings' => $meetings]), 200);
+    }
+
+    public function listHosts(Request $request, ZoomHostAssignmentService $assignment)
+    {
+        $institutionId = $request->filled('platform_institution_id')
+            ? (int) $request->input('platform_institution_id')
+            : null;
+
+        return response()->json($assignment->getHostInventory($institutionId));
     }
 
     public function listRecordings(Request $request)
@@ -209,11 +224,15 @@ class ZoomController extends Controller
 
         $payload = $request->all();
 
-        // Use logged-in user (instructor) as the Zoom host if available
         $user = $request->user();
-        $hostId = $user && !empty($user->email)
-            ? (string) $user->email
-            : (string) config('services.zoom.host_user_id', 'me');
+        $institutionId = $user && !empty($user->platform_institution_id)
+            ? (int) $user->platform_institution_id
+            : null;
+        $hostId = $this->zoom->resolveHostUserId(
+            $institutionId,
+            $user?->id ? (int) $user->id : null,
+            $user?->email,
+        );
 
         $isWebinar = strtolower((string) ($payload['type'] ?? 'meeting')) === 'webinar';
         $data = $isWebinar

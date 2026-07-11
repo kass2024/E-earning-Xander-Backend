@@ -68,9 +68,16 @@ class EnrollmentStudyShiftService
         }
 
         $days = $shifts->pluck('day_of_week')->map(fn ($day) => (int) $day);
-        if ($days->count() !== $days->unique()->count()) {
+        $timeKeys = $shifts->map(function (StudyShift $shift) {
+            $start = substr((string) $shift->start_time, 0, 5);
+            $end = substr((string) $shift->end_time, 0, 5);
+
+            return sprintf('%d|%s|%s', (int) $shift->day_of_week, $start, $end);
+        });
+
+        if ($timeKeys->count() !== $timeKeys->unique()->count()) {
             return response()->json([
-                'message' => 'You can only select one shift per day.',
+                'message' => 'You cannot select the same day and time more than once.',
             ], 422);
         }
 

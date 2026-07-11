@@ -27,6 +27,7 @@ class User extends Authenticatable
         'status',
          'phone',
         'platform_institution_id',
+        'zoom_host_user_id',
     ];
 
     /**

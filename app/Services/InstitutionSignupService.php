@@ -21,6 +21,7 @@ class InstitutionSignupService
     public function __construct(
         private readonly StripePaymentService $stripePaymentService,
         private readonly MailDeliveryService $mailDelivery,
+        private readonly ZoomHostAssignmentService $zoomHostAssignment,
     ) {}
 
     public function signupFeeCents(): int
@@ -72,6 +73,8 @@ class InstitutionSignupService
 
             $institution->owner_user_id = $user->id;
             $institution->save();
+
+            $this->zoomHostAssignment->ensureInstitutionHost($institution->fresh());
 
             $this->sendOwnerCredentials($institution->fresh(), $user, $plainPassword);
 

@@ -442,9 +442,13 @@ class CourseController extends Controller
         $zoomPassword = null;
         $joinPwd = null;
         $recordingFallback = false;
+        $institutionId = $course->platform_institution_id ? (int) $course->platform_institution_id : null;
+        $hostId = null;
+        $actorUserId = $instructor?->id ? (int) $instructor->id : null;
+        $actorEmail = $instructor?->email ?? ($data['instructor_email'] ?? null);
 
         if (!$zoomJoinLink) {
-            $hostId = $this->zoom->resolveHostUserId();
+            $hostId = $this->zoom->resolveHostUserId($institutionId, $actorUserId, $actorEmail);
             $topic = trim((string) ($data['topic'] ?? '')) ?: ($course->title ?? 'Course Class');
 
             $zoomPayload = [
@@ -533,6 +537,8 @@ class CourseController extends Controller
                         'meeting_id' => $zoomMeetingId,
                         'password' => $zoomPassword,
                         'join_pwd' => $joinPwd,
+                        'zoom_host_user_id' => $hostId ?? null,
+                        'platform_institution_id' => $institutionId,
                         'duration' => $data['duration'] ?? 60,
                         'timezone' => $timezone,
                         'auto_recording' => $recordingEnabled,
