@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\AvailableSchedule;
 use App\Models\MeetingRegistration;
 use App\Support\MeetingRegistrationJoinUrl;
+use App\Support\MeetingScheduleTimeFormatter;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
 
@@ -29,7 +30,44 @@ class MeetingRegistrationNotificationService
         }
 
         try {
-            if (strtolower($status) === 'rejected') {
+            if (strtolower($status) === 'rescheduled') {
+                $rebookUrl = rtrim(\App\Support\FrontendUrl::base(), '/') . '/meeting-registration';
+
+                $cancelUrl = null;
+                if (!empty($meetingRegistration->cancel_token)) {
+                    $cancelUrl = rtrim((string) config('app.url'), '/') . '/meeting/cancel/' . $meetingRegistration->cancel_token;
+                }
+
+                $proposedTime = null;
+                try {
+                    if (!empty($meetingRegistration->zoom_start_time)) {
+                        $tz = (string) config('services.pathways_webinar.timezone', 'Africa/Kigali');
+                        if ($meetingRegistration->relationLoaded('availableSchedule') && !empty($meetingRegistration->availableSchedule?->timezone)) {
+                            $tz = (string) $meetingRegistration->availableSchedule->timezone;
+                        }
+                        $proposedTime = Carbon::parse($meetingRegistration->zoom_start_time)->setTimezone($tz)->format('l, M j, Y g:i A') . ' (' . $tz . ')';
+                    }
+                } catch (\Throwable $e) {
+                    $proposedTime = null;
+                }
+
+                $defaultApology = "We sincerely apologize for any inconvenience. Due to an unexpected scheduling conflict, we need to reschedule your appointment. Please let us know your preferred date and time, and we will do our best to accommodate you. Thank you for your patience and understanding.";
+
+                $this->mail->sendView('emails.meeting_registration_rescheduled', [
+                    'appName' => config('app.name'),
+                    'name' => $meetingRegistration->full_name ?? '',
+                    'apologyMessage' => ($reason && trim($reason) !== '') ? $reason : $defaultApology,
+                    'proposedTime' => $proposedTime,
+                    'rebookUrl' => $rebookUrl,
+                    'cancelUrl' => $cancelUrl,
+                ], function ($message) use ($to) {
+                    $message->to($to)->subject('We need to reschedule your appointment');
+                }, [
+                    'event' => 'meeting_registration_rescheduled',
+                    'meeting_registration_id' => $meetingRegistration->id ?? null,
+                    'to' => $to,
+                ]);
+            } elseif (strtolower($status) === 'rejected') {
                 $this->mail->sendView('emails.meeting_registration_rejected', [
                     'appName' => config('app.name'),
                     'name' => $meetingRegistration->full_name ?? '',
@@ -53,35 +91,38 @@ class MeetingRegistrationNotificationService
                     $effectiveJoinUrl = (string) config('services.pathways_webinar.zoom_join_url');
                 }
 
-                $nextSessionText = $frontendScheduleLabel;
+                $savedLabel = trim((string) ($meetingRegistration->schedule_label ?? ''));
+                $nextSessionText = $savedLabel !== '' ? $savedLabel : $frontendScheduleLabel;
+                $sessionDetails = MeetingScheduleTimeFormatter::buildEmailDetails(
+                    $meetingRegistration,
+                    $nextSessionText ?: null
+                );
 
-                if (!$nextSessionText) {
-                    $tz = (string) config('services.pathways_webinar.timezone', 'Africa/Kigali');
-                    try {
-                        if ($meetingRegistration->relationLoaded('availableSchedule') && !empty($meetingRegistration->availableSchedule?->timezone)) {
-                            $tz = (string) $meetingRegistration->availableSchedule->timezone;
-                        }
-                    } catch (\Throwable $e) {
-                        // ignore
-                    }
-
+                if (!$sessionDetails['learnerSession']) {
                     if ($meetingRegistration->relationLoaded('availableSchedule') && $meetingRegistration->availableSchedule) {
-                        $nextSessionText = $this->learnerScheduleLabel($meetingRegistration->availableSchedule, $meetingRegistration->country ?? null);
+                        $nextSessionText = $this->learnerScheduleLabel(
+                            $meetingRegistration->availableSchedule,
+                            $meetingRegistration->country ?? null
+                        );
                         if (!$nextSessionText) {
                             $nextSessionText = $this->scheduleLabel($meetingRegistration->availableSchedule);
                         }
                     }
                     if (!$nextSessionText) {
-                        $nextStart = null;
+                        $tz = MeetingScheduleTimeFormatter::scheduleTimezone($meetingRegistration->availableSchedule);
                         try {
                             if (!empty($meetingRegistration->zoom_start_time)) {
                                 $nextStart = Carbon::parse($meetingRegistration->zoom_start_time)->setTimezone($tz);
+                                $nextSessionText = $nextStart->format('Y-m-d H:i') . ' (' . $tz . ')';
                             }
                         } catch (\Throwable $e) {
-                            $nextStart = null;
+                            $nextSessionText = null;
                         }
-                        $nextSessionText = $nextStart ? ($nextStart->format('Y-m-d H:i') . ' (' . $tz . ')') : null;
                     }
+                    $sessionDetails = MeetingScheduleTimeFormatter::buildEmailDetails(
+                        $meetingRegistration,
+                        $nextSessionText
+                    );
                 }
 
                 $scheduleDescription = null;
@@ -110,7 +151,12 @@ class MeetingRegistrationNotificationService
                     'appName' => config('app.name'),
                     'name' => $meetingRegistration->full_name ?? '',
                     'joinUrl' => $effectiveJoinUrl,
-                    'nextSession' => $nextSessionText,
+                    'nextSession' => $sessionDetails['learnerSession'],
+                    'hostSession' => $sessionDetails['hostSession'],
+                    'duration' => $sessionDetails['duration'],
+                    'learnerTimezone' => $sessionDetails['learnerTimezone'],
+                    'hostTimezone' => $sessionDetails['hostTimezone'],
+                    'platform' => $sessionDetails['platform'],
                     'scheduleDescription' => $scheduleDescription,
                     'learnerNotes' => $learnerNotes,
                     'recipientEmail' => $to,
@@ -165,38 +211,39 @@ class MeetingRegistrationNotificationService
             $effectiveJoinUrl = (string) config('services.pathways_webinar.zoom_join_url');
         }
 
-        $tz = (string) config('services.pathways_webinar.timezone', 'Africa/Kigali');
-        try {
-            if ($meetingRegistration->relationLoaded('availableSchedule') && !empty($meetingRegistration->availableSchedule?->timezone)) {
-                $tz = (string) $meetingRegistration->availableSchedule->timezone;
-            }
-        } catch (\Throwable $e) {
-            // ignore
-        }
-        $nextSessionText = null;
-        if ($meetingRegistration->relationLoaded('availableSchedule') && $meetingRegistration->availableSchedule) {
-            $nextSessionText = $this->learnerScheduleLabel($meetingRegistration->availableSchedule, $meetingRegistration->country ?? null);
-            if (!$nextSessionText) {
-                $nextSessionText = $this->scheduleLabel($meetingRegistration->availableSchedule);
-            }
-        }
-        if (!$nextSessionText) {
-            $nextStart = null;
-            try {
-                if (!empty($meetingRegistration->zoom_start_time)) {
-                    $nextStart = Carbon::parse($meetingRegistration->zoom_start_time)->setTimezone($tz);
+        $sessionDetails = MeetingScheduleTimeFormatter::buildEmailDetails($meetingRegistration);
+        if (!$sessionDetails['learnerSession']) {
+            $nextSessionText = null;
+            if ($meetingRegistration->relationLoaded('availableSchedule') && $meetingRegistration->availableSchedule) {
+                $nextSessionText = $this->learnerScheduleLabel($meetingRegistration->availableSchedule, $meetingRegistration->country ?? null);
+                if (!$nextSessionText) {
+                    $nextSessionText = $this->scheduleLabel($meetingRegistration->availableSchedule);
                 }
-            } catch (\Throwable $e) {
-                $nextStart = null;
             }
-            $nextSessionText = $nextStart ? ($nextStart->format('Y-m-d H:i') . ' (' . $tz . ')') : null;
+            if (!$nextSessionText) {
+                $tz = MeetingScheduleTimeFormatter::scheduleTimezone($meetingRegistration->availableSchedule);
+                try {
+                    if (!empty($meetingRegistration->zoom_start_time)) {
+                        $nextStart = Carbon::parse($meetingRegistration->zoom_start_time)->setTimezone($tz);
+                        $nextSessionText = $nextStart->format('Y-m-d H:i') . ' (' . $tz . ')';
+                    }
+                } catch (\Throwable $e) {
+                    $nextSessionText = null;
+                }
+            }
+            $sessionDetails = MeetingScheduleTimeFormatter::buildEmailDetails($meetingRegistration, $nextSessionText);
         }
 
         $this->mail->sendView('emails.meeting_registration_reminder', [
             'appName' => config('app.name'),
             'name' => $meetingRegistration->full_name ?? '',
             'joinUrl' => $effectiveJoinUrl,
-            'nextSession' => $nextSessionText,
+            'nextSession' => $sessionDetails['learnerSession'],
+            'hostSession' => $sessionDetails['hostSession'],
+            'duration' => $sessionDetails['duration'],
+            'learnerTimezone' => $sessionDetails['learnerTimezone'],
+            'hostTimezone' => $sessionDetails['hostTimezone'],
+            'platform' => $sessionDetails['platform'],
             'customMessage' => $message,
         ], function ($messageObj) use ($to) {
             $messageObj->to($to)->subject('Reminder: Your upcoming session');
@@ -260,6 +307,15 @@ class MeetingRegistrationNotificationService
     {
         if (!$country) {
             return $fallback;
+        }
+
+        if (str_contains($country, '/')) {
+            try {
+                new \DateTimeZone($country);
+                return $country;
+            } catch (\Throwable $e) {
+                // fall through
+            }
         }
 
         $c = mb_strtolower($country);

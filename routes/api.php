@@ -81,6 +81,7 @@ Route::prefix('admin')->group(function () {
     Route::put('meeting-registrations/{meetingRegistration}', [MeetingRegistrationController::class, 'update']);
     Route::post('meeting-registrations/{meetingRegistration}/approve', [MeetingRegistrationController::class, 'approve']);
     Route::post('meeting-registrations/{meetingRegistration}/reject', [MeetingRegistrationController::class, 'reject']);
+    Route::post('meeting-registrations/{meetingRegistration}/reschedule', [MeetingRegistrationController::class, 'reschedule']);
     Route::post('meeting-registrations/{meetingRegistration}/remind', [MeetingRegistrationController::class, 'remind']);
     Route::post('meeting-registrations/{meetingRegistration}/resend-join-link', [MeetingRegistrationController::class, 'resendJoinLink']);
     Route::delete('meeting-registrations/{meetingRegistration}', [MeetingRegistrationController::class, 'destroy']);

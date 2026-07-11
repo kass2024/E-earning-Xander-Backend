@@ -155,6 +155,18 @@ class MeetingRegistrationController extends Controller
             return $fallback;
         }
 
+        $country = trim($country);
+
+        // Browser IANA timezone sent from the booking form (e.g. America/New_York)
+        if (str_contains($country, '/')) {
+            try {
+                new \DateTimeZone($country);
+                return $country;
+            } catch (\Throwable $e) {
+                // fall through to country-name mapping
+            }
+        }
+
         $c = mb_strtolower($country);
 
         if (str_contains($c, 'rwanda')) return 'Africa/Kigali';
@@ -225,7 +237,9 @@ class MeetingRegistrationController extends Controller
             $startText = $startLocal->format('D g:i A');
             $endText = $endLocal->format('g:i A');
 
-            $suffix = $primaryCountry ? (' (' . $primaryCountry . ' time)') : '';
+            $suffix = $primaryCountry
+                ? (' (' . (str_contains($primaryCountry, '/') ? $primaryCountry : $primaryCountry . ' time') . ')')
+                : '';
 
             return $startText . ' - ' . $endText . $suffix;
         } catch (\Throwable $e) {
@@ -1056,6 +1070,7 @@ class MeetingRegistrationController extends Controller
             'email' => 'required|email|max:255|unique:meeting_registrations,email',
             'phone' => 'nullable|string|max:255|unique:meeting_registrations,phone',
             'country' => 'nullable|string|max:255',
+            'learner_timezone' => 'nullable|string|max:255',
             'notes' => 'nullable|string',
             'available_schedule_id' => 'required|exists:available_schedules,id',
             'schedule_label' => 'nullable|string',
@@ -1081,6 +1096,11 @@ class MeetingRegistrationController extends Controller
 
             $hasPhone = Schema::hasColumn('users', 'phone');
             $hasStatus = Schema::hasColumn('users', 'status');
+
+            $learnerTimezone = trim((string) ($data['learner_timezone'] ?? $data['country'] ?? ''));
+            if ($learnerTimezone === '') {
+                $learnerTimezone = null;
+            }
 
             if (!$user) {
                 $create = [
@@ -1118,7 +1138,7 @@ class MeetingRegistrationController extends Controller
                 'full_name' => $data['full_name'],
                 'email' => $data['email'],
                 'phone' => $data['phone'] ?? null,
-                'country' => $data['country'] ?? null,
+                'country' => $learnerTimezone,
                 'notes' => $data['notes'] ?? null,
             ];
 
@@ -1133,7 +1153,7 @@ class MeetingRegistrationController extends Controller
                 $createRegistration['rejected_reason'] = null;
             }
             if (Schema::hasColumn('meeting_registrations', 'zoom_start_time')) {
-                $createRegistration['zoom_start_time'] = $startAt->toDateTimeString();
+                $createRegistration['zoom_start_time'] = $startAt->copy()->utc()->format('Y-m-d H:i:s');
             }
             if (Schema::hasColumn('meeting_registrations', 'reminder_sent_at')) {
                 $createRegistration['reminder_sent_at'] = null;
@@ -1247,6 +1267,82 @@ class MeetingRegistrationController extends Controller
         return response()->json([
             'message' => 'Meeting registration rejected. Notification email will be sent shortly.',
             'registration' => $meetingRegistration,
+        ]);
+    }
+
+    public function reschedule(Request $request, MeetingRegistration $meetingRegistration)
+    {
+        $data = $request->validate([
+            'available_schedule_id' => 'nullable|integer|exists:available_schedules,id',
+            'message' => 'nullable|string|max:2000',
+        ]);
+
+        if (!$meetingRegistration->email) {
+            return response()->json([
+                'message' => 'Registration has no email address to notify.',
+            ], 422);
+        }
+
+        // Optionally move the meeting to a newly proposed schedule / time.
+        if (array_key_exists('available_schedule_id', $data) && !empty($data['available_schedule_id'])
+            && Schema::hasColumn('meeting_registrations', 'available_schedule_id')) {
+            $schedule = AvailableSchedule::query()->find($data['available_schedule_id']);
+            $meetingRegistration->available_schedule_id = $data['available_schedule_id'];
+
+            if ($schedule && Schema::hasColumn('meeting_registrations', 'zoom_start_time')) {
+                $meetingRegistration->zoom_start_time = $this->getNextStartFromSchedule($schedule)->toDateTimeString();
+            }
+        }
+
+        if (Schema::hasColumn('meeting_registrations', 'status')) {
+            $meetingRegistration->status = 'Rescheduled';
+        }
+        if (Schema::hasColumn('meeting_registrations', 'reminder_sent_at')) {
+            $meetingRegistration->reminder_sent_at = null;
+        }
+        if (Schema::hasColumn('meeting_registrations', 'cancel_token') && empty($meetingRegistration->cancel_token)) {
+            $meetingRegistration->cancel_token = Str::random(48);
+        }
+
+        $meetingRegistration->save();
+
+        SendMeetingRegistrationStatusEmailJob::dispatch(
+            $meetingRegistration->id,
+            'Rescheduled',
+            $data['message'] ?? null,
+        )->afterResponse();
+
+        return response()->json([
+            'message' => 'Reschedule request sent. The attendee will receive an apology email with options to rebook or cancel.',
+            'registration' => $meetingRegistration->fresh(),
+        ]);
+    }
+
+    public function cancelByToken(Request $request, string $token)
+    {
+        $registration = null;
+        if (Schema::hasColumn('meeting_registrations', 'cancel_token')) {
+            $registration = MeetingRegistration::query()->where('cancel_token', $token)->first();
+        }
+
+        if (!$registration) {
+            return response()->view('cancel.meeting_cancel_result', [
+                'appName' => config('app.name'),
+                'success' => false,
+                'name' => null,
+            ], 404);
+        }
+
+        if (Schema::hasColumn('meeting_registrations', 'status')) {
+            $registration->status = 'Cancelled';
+        }
+        $registration->save();
+
+        return response()->view('cancel.meeting_cancel_result', [
+            'appName' => config('app.name'),
+            'success' => true,
+            'name' => $registration->full_name,
+            'rebookUrl' => rtrim(FrontendUrl::base(), '/') . '/meeting-registration',
         ]);
     }
 

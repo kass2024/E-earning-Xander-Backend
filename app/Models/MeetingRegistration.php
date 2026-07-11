@@ -17,6 +17,7 @@ class MeetingRegistration extends Model
         'country',
         'notes',
         'status',
+        'cancel_token',
         'rejected_reason',
         'zoom_meeting_id',
         'zoom_join_url',

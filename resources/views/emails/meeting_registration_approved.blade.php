@@ -53,10 +53,21 @@
                                             <div style="font-size:14px;color:#334155;margin-top:8px;line-height:1.6;">
                                                 <strong>{{ $nextSession }}</strong>
                                             </div>
+                                            <div style="font-size:12px;color:#64748b;margin-top:8px;line-height:1.6;">
+                                                @if(!empty($duration))
+                                                    Duration: <strong>{{ $duration }}</strong><br />
+                                                @endif
+                                                @if(!empty($learnerTimezone))
+                                                    Your timezone: <strong>{{ $learnerTimezone }}</strong><br />
+                                                @endif
+                                                @if(!empty($hostSession) && !empty($hostTimezone) && ($hostSession !== $nextSession))
+                                                    Host time ({{ $hostTimezone }}): <strong>{{ $hostSession }}</strong><br />
+                                                @endif
+                                                Platform: <strong>{{ $platform ?? 'Zoom (online)' }}</strong>
+                                            </div>
                                         @else
                                             <div style="font-size:14px;color:#334155;margin-top:8px;">Time to be confirmed</div>
                                         @endif
-                                        <div style="font-size:13px;color:#64748b;margin-top:8px;">Platform: Zoom (online) via {{ $appName }}</div>
                                     </td>
                                 </tr>
                             </table>
@@ -66,6 +77,13 @@
                             <div style="margin-top:16px;padding:14px 16px;border:1px solid #fde68a;border-radius:12px;background:#fffbeb;">
                                 <div style="font-size:12px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:0.06em;">About this session</div>
                                 <div style="font-size:14px;color:#78350f;margin-top:6px;line-height:1.6;">{{ $scheduleDescription }}</div>
+                            </div>
+                        @endif
+
+                        @if(!empty($learnerNotes))
+                            <div style="margin-top:16px;padding:14px 16px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;">
+                                <div style="font-size:12px;font-weight:700;color:#012F6B;text-transform:uppercase;letter-spacing:0.06em;">Reason for booking</div>
+                                <div style="font-size:14px;color:#334155;margin-top:6px;line-height:1.6;">{{ $learnerNotes }}</div>
                             </div>
                         @endif
 
