@@ -1402,24 +1402,29 @@ class MeetingRegistrationController extends Controller
             $registration = MeetingRegistration::query()->where('cancel_token', $token)->first();
         }
 
+        $rebookUrl = rtrim(FrontendUrl::base(), '/') . '/meeting-registration';
+
         if (!$registration) {
             return response()->view('cancel.meeting_cancel_result', [
                 'appName' => config('app.name'),
                 'success' => false,
                 'name' => null,
+                'rebookUrl' => $rebookUrl,
             ], 404);
         }
 
-        if (Schema::hasColumn('meeting_registrations', 'status')) {
+        $alreadyCancelled = strtolower((string) ($registration->status ?? '')) === 'cancelled';
+
+        if (!$alreadyCancelled && Schema::hasColumn('meeting_registrations', 'status')) {
             $registration->status = 'Cancelled';
+            $registration->save();
         }
-        $registration->save();
 
         return response()->view('cancel.meeting_cancel_result', [
             'appName' => config('app.name'),
             'success' => true,
             'name' => $registration->full_name,
-            'rebookUrl' => rtrim(FrontendUrl::base(), '/') . '/meeting-registration',
+            'rebookUrl' => $rebookUrl,
         ]);
     }
 

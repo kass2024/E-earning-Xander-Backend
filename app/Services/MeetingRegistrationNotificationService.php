@@ -4,10 +4,13 @@ namespace App\Services;
 
 use App\Models\AvailableSchedule;
 use App\Models\MeetingRegistration;
+use App\Support\FrontendUrl;
 use App\Support\MeetingRegistrationJoinUrl;
 use App\Support\MeetingScheduleTimeFormatter;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 
 class MeetingRegistrationNotificationService
 {
@@ -31,12 +34,9 @@ class MeetingRegistrationNotificationService
 
         try {
             if (strtolower($status) === 'rescheduled') {
-                $rebookUrl = rtrim(\App\Support\FrontendUrl::base(), '/') . '/meeting-registration';
-
-                $cancelUrl = null;
-                if (!empty($meetingRegistration->cancel_token)) {
-                    $cancelUrl = rtrim((string) config('app.url'), '/') . '/meeting/cancel/' . $meetingRegistration->cancel_token;
-                }
+                $meetingRegistration = $this->ensureCancelToken($meetingRegistration);
+                $rebookUrl = $this->bookAnotherUrl();
+                $cancelUrl = $this->cancelUrl($meetingRegistration);
 
                 $proposedTime = null;
                 try {
@@ -80,6 +80,8 @@ class MeetingRegistrationNotificationService
                     'to' => $to,
                 ]);
             } elseif (strtolower($status) === 'approved') {
+                $meetingRegistration = $this->ensureCancelToken($meetingRegistration);
+
                 $effectiveJoinUrl = $joinUrl;
                 if (!$effectiveJoinUrl) {
                     $effectiveJoinUrl = MeetingRegistrationJoinUrl::forRegistration($meetingRegistration);
@@ -147,21 +149,32 @@ class MeetingRegistrationNotificationService
                     $learnerNotes = null;
                 }
 
+                $topic = trim((string) ($scheduleDescription ?? ''));
+                if ($topic === '') {
+                    $topic = 'Potential Partnership Discussion';
+                }
+
                 $this->mail->sendView('emails.meeting_registration_approved', [
                     'appName' => config('app.name'),
+                    'companyName' => config('app.name', 'Xander Global Scholars'),
+                    'meetBrand' => 'XanderTech meet',
                     'name' => $meetingRegistration->full_name ?? '',
+                    'topic' => $topic,
                     'joinUrl' => $effectiveJoinUrl,
+                    'joinUrlDisplay' => $this->friendlyJoinDisplay($effectiveJoinUrl),
                     'nextSession' => $sessionDetails['learnerSession'],
                     'hostSession' => $sessionDetails['hostSession'],
                     'duration' => $sessionDetails['duration'],
                     'learnerTimezone' => $sessionDetails['learnerTimezone'],
                     'hostTimezone' => $sessionDetails['hostTimezone'],
-                    'platform' => $sessionDetails['platform'],
+                    'platform' => 'XanderTech meet',
                     'scheduleDescription' => $scheduleDescription,
                     'learnerNotes' => $learnerNotes,
                     'recipientEmail' => $to,
+                    'cancelUrl' => $this->cancelUrl($meetingRegistration),
+                    'bookAnotherUrl' => $this->bookAnotherUrl(),
                 ], function ($message) use ($to) {
-                    $message->to($to)->subject('Your meeting is confirmed');
+                    $message->to($to)->subject('Your appointment is confirmed — XanderTech meet');
                 }, [
                     'event' => 'meeting_registration_approved',
                     'meeting_registration_id' => $meetingRegistration->id ?? null,
@@ -203,6 +216,8 @@ class MeetingRegistrationNotificationService
             return;
         }
 
+        $meetingRegistration = $this->ensureCancelToken($meetingRegistration);
+
         $effectiveJoinUrl = MeetingRegistrationJoinUrl::forRegistration($meetingRegistration);
         if (!$effectiveJoinUrl && !empty($meetingRegistration->zoom_join_url)) {
             $effectiveJoinUrl = $meetingRegistration->zoom_join_url;
@@ -236,22 +251,69 @@ class MeetingRegistrationNotificationService
 
         $this->mail->sendView('emails.meeting_registration_reminder', [
             'appName' => config('app.name'),
+            'companyName' => config('app.name', 'Xander Global Scholars'),
+            'meetBrand' => 'XanderTech meet',
             'name' => $meetingRegistration->full_name ?? '',
             'joinUrl' => $effectiveJoinUrl,
+            'joinUrlDisplay' => $this->friendlyJoinDisplay($effectiveJoinUrl),
             'nextSession' => $sessionDetails['learnerSession'],
             'hostSession' => $sessionDetails['hostSession'],
             'duration' => $sessionDetails['duration'],
             'learnerTimezone' => $sessionDetails['learnerTimezone'],
             'hostTimezone' => $sessionDetails['hostTimezone'],
-            'platform' => $sessionDetails['platform'],
+            'platform' => 'XanderTech meet',
             'customMessage' => $message,
+            'cancelUrl' => $this->cancelUrl($meetingRegistration),
+            'bookAnotherUrl' => $this->bookAnotherUrl(),
+            'recipientEmail' => $to,
         ], function ($messageObj) use ($to) {
-            $messageObj->to($to)->subject('Reminder: Your upcoming session');
+            $messageObj->to($to)->subject('Reminder: Your upcoming XanderTech meet session');
         }, [
             'event' => 'meeting_registration_reminder',
             'meeting_registration_id' => $meetingRegistration->id ?? null,
             'to' => $to,
         ]);
+    }
+
+    protected function ensureCancelToken(MeetingRegistration $registration): MeetingRegistration
+    {
+        if (!Schema::hasColumn('meeting_registrations', 'cancel_token')) {
+            return $registration;
+        }
+
+        if (!empty($registration->cancel_token)) {
+            return $registration;
+        }
+
+        $registration->cancel_token = Str::random(48);
+        $registration->save();
+
+        return $registration->fresh() ?? $registration;
+    }
+
+    protected function cancelUrl(MeetingRegistration $registration): ?string
+    {
+        if (empty($registration->cancel_token)) {
+            return null;
+        }
+
+        return rtrim((string) config('app.url'), '/') . '/meeting/cancel/' . $registration->cancel_token;
+    }
+
+    protected function bookAnotherUrl(): string
+    {
+        return rtrim(FrontendUrl::base(), '/') . '/meeting-registration';
+    }
+
+    protected function friendlyJoinDisplay(?string $joinUrl): ?string
+    {
+        if (!$joinUrl) {
+            return null;
+        }
+
+        $trimmed = preg_replace('#^https?://#i', '', $joinUrl) ?? $joinUrl;
+
+        return rtrim($trimmed, '/');
     }
 
     private function scheduleLabel(?AvailableSchedule $schedule): ?string
@@ -312,6 +374,7 @@ class MeetingRegistrationNotificationService
         if (str_contains($country, '/')) {
             try {
                 new \DateTimeZone($country);
+
                 return $country;
             } catch (\Throwable $e) {
                 // fall through
@@ -320,16 +383,36 @@ class MeetingRegistrationNotificationService
 
         $c = mb_strtolower($country);
 
-        if (str_contains($c, 'rwanda')) return 'Africa/Kigali';
-        if (str_contains($c, 'kenya')) return 'Africa/Nairobi';
-        if (str_contains($c, 'uganda')) return 'Africa/Kampala';
-        if (str_contains($c, 'tanzania')) return 'Africa/Dar_es_Salaam';
-        if (str_contains($c, 'burundi')) return 'Africa/Bujumbura';
-        if (str_contains($c, 'canada')) return 'America/Toronto';
-        if (str_contains($c, 'united states') || str_contains($c, 'usa')) return 'America/New_York';
-        if (str_contains($c, 'united kingdom') || str_contains($c, 'uk')) return 'Europe/London';
-        if (str_contains($c, 'france')) return 'Europe/Paris';
-        if (str_contains($c, 'germany')) return 'Europe/Berlin';
+        if (str_contains($c, 'rwanda')) {
+            return 'Africa/Kigali';
+        }
+        if (str_contains($c, 'kenya')) {
+            return 'Africa/Nairobi';
+        }
+        if (str_contains($c, 'uganda')) {
+            return 'Africa/Kampala';
+        }
+        if (str_contains($c, 'tanzania')) {
+            return 'Africa/Dar_es_Salaam';
+        }
+        if (str_contains($c, 'burundi')) {
+            return 'Africa/Bujumbura';
+        }
+        if (str_contains($c, 'canada')) {
+            return 'America/Toronto';
+        }
+        if (str_contains($c, 'united states') || str_contains($c, 'usa')) {
+            return 'America/New_York';
+        }
+        if (str_contains($c, 'united kingdom') || str_contains($c, 'uk')) {
+            return 'Europe/London';
+        }
+        if (str_contains($c, 'france')) {
+            return 'Europe/Paris';
+        }
+        if (str_contains($c, 'germany')) {
+            return 'Europe/Berlin';
+        }
 
         return $fallback;
     }

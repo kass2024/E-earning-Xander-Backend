@@ -30,7 +30,7 @@
                                 <div style="margin-top:26px;">
                                     <a href="{{ $rebookUrl }}"
                                        style="display:inline-block;background:#012F6B;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 26px;border-radius:9999px;">
-                                        Book a new meeting
+                                        Book another appointment
                                     </a>
                                 </div>
                             @endif
@@ -39,6 +39,14 @@
                             <div style="font-size:14px;color:#374151;margin-top:12px;line-height:1.7;">
                                 We could not find an appointment for this cancellation link. It may have already been cancelled or the link is incorrect.
                             </div>
+                            @if(!empty($rebookUrl))
+                                <div style="margin-top:26px;">
+                                    <a href="{{ $rebookUrl }}"
+                                       style="display:inline-block;background:#012F6B;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 26px;border-radius:9999px;">
+                                        Book another appointment
+                                    </a>
+                                </div>
+                            @endif
                         @endif
                     </td>
                 </tr>

@@ -153,6 +153,7 @@ class LiveZoomCohortZoomService
 
         return [
             'topic' => trim((string) ($cohort->notes ?? '')) ?: "Live Zoom Cohort — {$dayLabel}",
+            'provider' => 'zoom',
             'meeting_id' => $cohort->zoom_meeting_id ?? null,
             'join_url' => $cohort->zoom_link ?? null,
             'start_url' => $cohort->zoom_start_url ?? null,

@@ -388,6 +388,7 @@ class PlatformInstitutionController extends Controller
             'name' => 'sometimes|string|max:255',
             'website' => 'nullable|url|max:255',
             'address' => 'nullable|string|max:1000',
+            'meeting_provider' => 'sometimes|string|in:zoom,daily',
             'logo' => 'nullable|file|mimes:png,jpg,jpeg,gif,webp|max:5120',
             'portal_tagline' => 'nullable|string|max:255',
             'portal_hero_title' => 'nullable|string|max:255',
@@ -423,6 +424,21 @@ class PlatformInstitutionController extends Controller
         }
         if (array_key_exists('address', $data)) {
             $institution->address = $data['address'];
+        }
+
+        if (array_key_exists('meeting_provider', $data)) {
+            $provider = MeetingProvider::fromStringOrDefault($data['meeting_provider']);
+            if (!(bool) config('daily.enabled', false) && $provider === MeetingProvider::Daily) {
+                return response()->json([
+                    'message' => 'Daily integration is disabled. Set DAILY_INTEGRATION_ENABLED=true and configure Daily credentials.',
+                ], 422);
+            }
+            try {
+                $this->meetingProviders->assertSelectable($provider);
+            } catch (\InvalidArgumentException $e) {
+                return response()->json(['message' => $e->getMessage()], 422);
+            }
+            $institution->meeting_provider = $provider->value;
         }
 
         foreach ([

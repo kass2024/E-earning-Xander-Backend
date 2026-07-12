@@ -153,7 +153,7 @@ class MeetingScheduleTimeFormatter
             'duration' => self::durationLabel($schedule),
             'learnerTimezone' => $learnerTz,
             'hostTimezone' => $hostTz,
-            'platform' => 'Zoom (online)',
+            'platform' => 'XanderTech meet',
         ];
     }
 }

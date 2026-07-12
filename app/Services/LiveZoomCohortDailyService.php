@@ -22,13 +22,7 @@ class LiveZoomCohortDailyService
 
     public function resolveProvider(LiveZoomCohort $cohort): MeetingProvider
     {
-        if (Schema::hasColumn('livezoom_cohort', 'meeting_provider')) {
-            $stored = MeetingProvider::tryFromString($cohort->meeting_provider ?? null);
-            if ($stored) {
-                return $stored;
-            }
-        }
-
+        // Already provisioned Daily room for this session → stay on Daily.
         if (trim((string) ($cohort->daily_room_name ?? '')) !== '') {
             return MeetingProvider::Daily;
         }
@@ -38,18 +32,45 @@ class LiveZoomCohortDailyService
             $institution = PlatformInstitution::find((int) $cohort->platform_institution_id);
         }
 
-        $default = $this->providers->institutionProvider($institution);
-
-        // Prefer platform default (Daily) when configured — do not stick on a stale Zoom meeting id.
-        if ($default === MeetingProvider::Daily && $this->daily->isConfigured()) {
+        // Institution (or main-platform) setting is the source of truth for live cohorts.
+        $institutionDefault = $this->providers->institutionProvider($institution);
+        if ($institutionDefault === MeetingProvider::Daily && $this->daily->isConfigured() && (bool) config('daily.enabled', false)) {
             return MeetingProvider::Daily;
+        }
+
+        if (Schema::hasColumn('livezoom_cohort', 'meeting_provider')) {
+            $stored = MeetingProvider::tryFromString($cohort->meeting_provider ?? null);
+            if ($stored) {
+                return $stored;
+            }
         }
 
         if (trim((string) ($cohort->zoom_meeting_id ?? '')) !== '') {
             return MeetingProvider::Zoom;
         }
 
-        return $default;
+        return $institutionDefault;
+    }
+
+    /**
+     * Persist the institution/main-platform meeting provider onto the cohort before start.
+     */
+    public function syncProviderFromInstitution(LiveZoomCohort $cohort): LiveZoomCohort
+    {
+        if (!Schema::hasColumn('livezoom_cohort', 'meeting_provider')) {
+            return $cohort;
+        }
+
+        $provider = $this->defaultProviderForNewCohort(
+            $cohort->platform_institution_id ? (int) $cohort->platform_institution_id : null
+        );
+
+        if ((string) ($cohort->meeting_provider ?? '') !== $provider->value) {
+            $cohort->meeting_provider = $provider->value;
+            $cohort->save();
+        }
+
+        return $cohort->fresh() ?? $cohort;
     }
 
     public function usesDaily(LiveZoomCohort $cohort): bool
@@ -183,15 +204,51 @@ class LiveZoomCohortDailyService
      */
     public function formatDailyPayload(LiveZoomCohort $cohort): array
     {
+        $dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        $dayLabel = $dayNames[(int) $cohort->day_of_week] ?? 'Cohort';
+        $topic = trim((string) ($cohort->notes ?? '')) ?: "Live Cohort — {$dayLabel}";
+        $roomName = trim((string) ($cohort->daily_room_name ?? ''));
+        $publicJoin = \App\Support\LiveZoomCohortHelper::publicJoinUrl($cohort);
+        $hostStudio = \App\Support\LiveZoomCohortHelper::hostStudioUrl($cohort);
+        $participantPath = \App\Support\LiveZoomCohortHelper::participantRoomPath($cohort);
+        $participantUrl = \App\Support\LiveZoomCohortHelper::participantRoomUrl($cohort);
+
+        $shareLines = [
+            (string) config('app.name', 'Xander Learning Hub') . ' — Live Cohort (Daily)',
+            "Topic: {$topic}",
+            $roomName !== '' ? "Room: {$roomName}" : null,
+            $publicJoin ? "Public join (queue): {$publicJoin}" : null,
+            $participantUrl ? "In-app join: {$participantUrl}" : null,
+            "Schedule: {$dayLabel}, " . substr((string) $cohort->start_time, 0, 5) . ' – ' . substr((string) $cohort->end_time, 0, 5)
+                . ($cohort->timezone ? " ({$cohort->timezone})" : ''),
+            'Hosts and learners join inside the web app — no external Daily links required.',
+        ];
+
+        $shareText = implode("\n", array_values(array_filter($shareLines)));
+
         return [
             'provider' => MeetingProvider::Daily->value,
-            'room_name' => $cohort->daily_room_name,
+            'topic' => $topic,
+            'meeting_id' => $roomName !== '' ? $roomName : null,
+            'room_name' => $roomName !== '' ? $roomName : null,
             'room_url' => $cohort->daily_room_url,
-            'join_url' => $cohort->daily_room_url,
-            'public_join_url' => \App\Support\LiveZoomCohortHelper::publicJoinUrl($cohort),
-            'host_studio_url' => \App\Support\LiveZoomCohortHelper::hostStudioUrl($cohort),
+            'join_url' => $publicJoin,
+            'start_url' => $hostStudio,
+            'password' => null,
+            'description' => $shareText,
+            'share_text' => $shareText,
+            'public_join_url' => $publicJoin,
+            'embed_enabled' => true,
+            'host_studio_url' => $hostStudio,
             'host_studio_path' => \App\Support\LiveZoomCohortHelper::hostStudioPath($cohort),
-            'participant_room_path' => \App\Support\LiveZoomCohortHelper::participantRoomPath($cohort),
+            'participant_room_path' => $participantPath,
+            'participant_room_url' => $participantUrl,
+            'schedule' => [
+                'day' => $dayLabel,
+                'start_time' => $cohort->start_time,
+                'end_time' => $cohort->end_time,
+                'timezone' => $cohort->timezone,
+            ],
         ];
     }
 

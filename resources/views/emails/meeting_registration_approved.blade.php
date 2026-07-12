@@ -3,120 +3,154 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Booking confirmed</title>
+    <title>Appointment confirmed</title>
 </head>
-<body style="margin:0;padding:0;background:#f1f5f9;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
+<body style="margin:0;padding:0;background:#f6f7fb;font-family:Arial,Helvetica,sans-serif;color:#202124;">
 
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f1f5f9;padding:32px 16px;">
+@php
+    $meetBrand = $meetBrand ?? 'XanderTech meet';
+    $topicTitle = $topic ?? ('Meeting with ' . ($appName ?? 'Xander'));
+    if (!empty($name)) {
+        $topicTitle = $topicTitle . ' (' . $name . ')';
+    }
+    $companyName = $companyName ?? ($appName ?? 'Xander Global Scholars');
+    $displayJoin = $joinUrlDisplay ?? $joinUrl ?? null;
+@endphp
+
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f6f7fb;padding:28px 12px;">
     <tr>
         <td align="center">
-            <table role="presentation" width="560" cellspacing="0" cellpadding="0" style="width:560px;max-width:560px;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0;box-shadow:0 10px 30px rgba(1,47,107,0.08);">
+            <table role="presentation" width="560" cellspacing="0" cellpadding="0" style="width:560px;max-width:560px;background:#ffffff;border-radius:8px;overflow:hidden;border:1px solid #dadce0;">
+
+                {{-- Join CTA (Google Calendar–style) --}}
                 <tr>
-                    <td style="padding:32px 32px 20px;text-align:center;">
-                        <div style="width:56px;height:56px;margin:0 auto 16px;border-radius:50%;background:#012F6B;display:flex;align-items:center;justify-content:center;">
-                            <span style="color:#ffffff;font-size:28px;line-height:56px;">&#10003;</span>
-                        </div>
-                        <div style="font-size:24px;font-weight:700;color:#012F6B;">Booking confirmed</div>
-                        @if(!empty($recipientEmail))
-                            <div style="font-size:14px;color:#64748b;margin-top:10px;line-height:1.6;">
-                                Email sent to <strong style="color:#012F6B;">{{ $recipientEmail }}</strong>
-                            </div>
-                        @endif
-                    </td>
-                </tr>
-
-                <tr>
-                    <td style="padding:0 32px 24px;">
-                        <div style="font-size:14px;color:#334155;line-height:1.6;">
-                            Hello <strong>{{ $name }}</strong>,<br />
-                            Your session with <strong>{{ $appName }}</strong> is confirmed. Save the details below and use the button to join when it is time.
-                        </div>
-
-                        <div style="margin-top:20px;padding:16px 18px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;">
-                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
-                                <tr>
-                                    @if(!empty($nextSession))
-                                        <td style="width:64px;vertical-align:top;padding-right:14px;">
-                                            <div style="width:56px;border-radius:10px;border:1px solid #cbd5e1;background:#ffffff;text-align:center;overflow:hidden;">
-                                                <div style="background:#012F6B;color:#ffffff;font-size:11px;font-weight:700;padding:4px 0;text-transform:uppercase;">
-                                                    Session
-                                                </div>
-                                                <div style="font-size:18px;font-weight:700;color:#012F6B;padding:8px 4px;line-height:1.2;">
-                                                    &#10003;
-                                                </div>
-                                            </div>
-                                        </td>
-                                    @endif
-                                    <td style="vertical-align:top;">
-                                        <div style="font-size:16px;font-weight:700;color:#012F6B;">Online consultation</div>
-                                        @if(!empty($nextSession))
-                                            <div style="font-size:14px;color:#334155;margin-top:8px;line-height:1.6;">
-                                                <strong>{{ $nextSession }}</strong>
-                                            </div>
-                                            <div style="font-size:12px;color:#64748b;margin-top:8px;line-height:1.6;">
-                                                @if(!empty($duration))
-                                                    Duration: <strong>{{ $duration }}</strong><br />
-                                                @endif
-                                                @if(!empty($learnerTimezone))
-                                                    Your timezone: <strong>{{ $learnerTimezone }}</strong><br />
-                                                @endif
-                                                @if(!empty($hostSession) && !empty($hostTimezone) && ($hostSession !== $nextSession))
-                                                    Host time ({{ $hostTimezone }}): <strong>{{ $hostSession }}</strong><br />
-                                                @endif
-                                                Platform: <strong>{{ $platform ?? 'Zoom (online)' }}</strong>
-                                            </div>
-                                        @else
-                                            <div style="font-size:14px;color:#334155;margin-top:8px;">Time to be confirmed</div>
-                                        @endif
-                                    </td>
-                                </tr>
-                            </table>
-                        </div>
-
-                        @if(!empty($scheduleDescription))
-                            <div style="margin-top:16px;padding:14px 16px;border:1px solid #fde68a;border-radius:12px;background:#fffbeb;">
-                                <div style="font-size:12px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:0.06em;">About this session</div>
-                                <div style="font-size:14px;color:#78350f;margin-top:6px;line-height:1.6;">{{ $scheduleDescription }}</div>
-                            </div>
-                        @endif
-
-                        @if(!empty($learnerNotes))
-                            <div style="margin-top:16px;padding:14px 16px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;">
-                                <div style="font-size:12px;font-weight:700;color:#012F6B;text-transform:uppercase;letter-spacing:0.06em;">Reason for booking</div>
-                                <div style="font-size:14px;color:#334155;margin-top:6px;line-height:1.6;">{{ $learnerNotes }}</div>
-                            </div>
-                        @endif
-
+                    <td style="padding:28px 28px 8px;">
                         @if(!empty($joinUrl))
-                            <div style="margin-top:20px;padding:16px 18px;border:1px solid #bfdbfe;border-radius:12px;background:#eff6ff;">
-                                <div style="font-size:14px;font-weight:700;color:#012F6B;">Join online meeting</div>
-                                <div style="font-size:13px;color:#475569;margin-top:6px;line-height:1.6;">
-                                    Open the link below in your browser to join through our secure meeting room (no Google Meet required).
-                                </div>
-                                <div style="margin-top:14px;">
-                                    <a href="{{ $joinUrl }}" target="_blank" style="display:inline-block;background:#012F6B;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 20px;border-radius:999px;">Join meeting</a>
-                                </div>
-                                <div style="font-size:12px;color:#475569;margin-top:12px;word-break:break-all;line-height:1.6;">
-                                    Or copy this link:<br />
-                                    <a href="{{ $joinUrl }}" target="_blank" style="color:#012F6B;text-decoration:underline;">{{ $joinUrl }}</a>
-                                </div>
+                            <div style="text-align:left;">
+                                <a href="{{ $joinUrl }}" target="_blank"
+                                   style="display:inline-block;background:#1a73e8;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:11px 22px;border-radius:4px;">
+                                    Join with {{ $meetBrand }}
+                                </a>
+                            </div>
+                            <div style="margin-top:16px;font-size:14px;color:#3c4043;line-height:1.6;">
+                                <span style="color:#5f6368;">Meeting link</span><br />
+                                <a href="{{ $joinUrl }}" target="_blank" style="color:#1a73e8;text-decoration:none;word-break:break-all;">{{ $displayJoin }}</a>
+                            </div>
+                            <div style="margin-top:12px;font-size:13px;color:#5f6368;line-height:1.55;">
+                                Test your setup any time before your appointment.
+                            </div>
+                            <div style="margin-top:6px;font-size:13px;color:#5f6368;line-height:1.55;">
+                                New to {{ $meetBrand }}? Join from your browser — no extra app required.
+                            </div>
+                        @else
+                            <div style="font-size:14px;color:#3c4043;line-height:1.6;">
+                                Your appointment is confirmed. Your {{ $meetBrand }} join link will be available before the session.
                             </div>
                         @endif
-
-                        <div style="font-size:13px;color:#64748b;margin-top:20px;line-height:1.6;">
-                            Need to make a change? Reply to this email and our team will help.
-                        </div>
-
-                        <div style="margin-top:22px;border-top:1px solid #e2e8f0;padding-top:14px;font-size:13px;color:#64748b;line-height:1.6;">
-                            Thank you,<br />
-                            <strong style="color:#012F6B;">{{ $appName }}</strong>
-                        </div>
                     </td>
                 </tr>
 
                 <tr>
-                    <td style="background:#f8fafc;padding:14px 32px;font-size:12px;color:#94a3b8;line-height:1.6;">
-                        This is an automated confirmation. Please do not share your private meeting link publicly.
+                    <td style="padding:8px 28px;">
+                        <div style="border-top:1px solid #e8eaed;"></div>
+                    </td>
+                </tr>
+
+                {{-- Title + time --}}
+                <tr>
+                    <td style="padding:16px 28px 8px;">
+                        <div style="font-size:20px;font-weight:700;color:#202124;line-height:1.35;">
+                            {{ $topicTitle }}
+                        </div>
+                        @if(!empty($nextSession))
+                            <div style="margin-top:10px;font-size:14px;color:#3c4043;line-height:1.55;">
+                                {{ $nextSession }}
+                            </div>
+                        @endif
+                        @if(!empty($duration))
+                            <div style="margin-top:4px;font-size:13px;color:#5f6368;">
+                                Duration: {{ $duration }}
+                            </div>
+                        @endif
+                    </td>
+                </tr>
+
+                <tr>
+                    <td style="padding:8px 28px;">
+                        <div style="border-top:1px solid #e8eaed;"></div>
+                    </td>
+                </tr>
+
+                {{-- Booking details --}}
+                <tr>
+                    <td style="padding:12px 28px 8px;">
+                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                            <tr>
+                                <td style="padding:6px 0;font-size:13px;color:#5f6368;width:120px;vertical-align:top;">Booked by</td>
+                                <td style="padding:6px 0;font-size:14px;color:#202124;vertical-align:top;">
+                                    <strong>{{ $name }}</strong>
+                                    @if(!empty($recipientEmail))
+                                        <div style="color:#5f6368;font-size:13px;margin-top:2px;">{{ $recipientEmail }}</div>
+                                    @endif
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style="padding:6px 0;font-size:13px;color:#5f6368;width:120px;vertical-align:top;">Company Name</td>
+                                <td style="padding:6px 0;font-size:14px;color:#202124;vertical-align:top;">{{ $companyName }}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding:6px 0;font-size:13px;color:#5f6368;width:120px;vertical-align:top;">Platform</td>
+                                <td style="padding:6px 0;font-size:14px;color:#202124;vertical-align:top;">{{ $meetBrand }}</td>
+                            </tr>
+                            @if(!empty($learnerNotes))
+                                <tr>
+                                    <td style="padding:6px 0;font-size:13px;color:#5f6368;width:120px;vertical-align:top;">Notes</td>
+                                    <td style="padding:6px 0;font-size:14px;color:#202124;vertical-align:top;">{{ $learnerNotes }}</td>
+                                </tr>
+                            @endif
+                        </table>
+                    </td>
+                </tr>
+
+                <tr>
+                    <td style="padding:16px 28px 8px;">
+                        <div style="border-top:1px solid #e8eaed;"></div>
+                    </td>
+                </tr>
+
+                {{-- Cancel / Book another --}}
+                <tr>
+                    <td style="padding:8px 28px 24px;">
+                        <table role="presentation" cellspacing="0" cellpadding="0">
+                            <tr>
+                                @if(!empty($cancelUrl))
+                                    <td style="padding-right:10px;">
+                                        <a href="{{ $cancelUrl }}" target="_blank"
+                                           style="display:inline-block;background:#ffffff;color:#1a73e8;text-decoration:none;font-weight:600;font-size:13px;padding:10px 16px;border-radius:4px;border:1px solid #dadce0;">
+                                            Cancel appointment
+                                        </a>
+                                    </td>
+                                @endif
+                                @if(!empty($bookAnotherUrl))
+                                    <td>
+                                        <a href="{{ $bookAnotherUrl }}" target="_blank"
+                                           style="display:inline-block;background:#ffffff;color:#1a73e8;text-decoration:none;font-weight:600;font-size:13px;padding:10px 16px;border-radius:4px;border:1px solid #dadce0;">
+                                            Book another appointment
+                                        </a>
+                                    </td>
+                                @endif
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+
+                <tr>
+                    <td style="background:#f8f9fa;padding:16px 28px;font-size:12px;color:#5f6368;line-height:1.55;">
+                        Powered by {{ $appName }} appointment scheduling ·
+                        <a href="{{ $bookAnotherUrl ?? '#' }}" style="color:#1a73e8;text-decoration:none;">Book another date</a>
+                        <div style="margin-top:8px;">
+                            You are receiving this email because you booked an appointment with {{ $companyName }}.
+                        </div>
                     </td>
                 </tr>
             </table>

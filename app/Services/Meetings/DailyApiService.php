@@ -359,9 +359,20 @@ class DailyApiService
                 'result' => $result,
             ];
         } catch (\Throwable $e) {
+            $message = $e->getMessage() ?: 'Daily could not start cloud recording. Enable cloud recording on your Daily plan/domain.';
+            // Client SDK may have already started cloud recording / live streaming.
+            if ($this->isAlreadyStreamingError($message)) {
+                return [
+                    'ok' => true,
+                    'status' => 'already_active',
+                    'message' => 'Recording is already active in this room.',
+                    'result' => ['info' => 'active_stream'],
+                ];
+            }
+
             return [
                 'ok' => false,
-                'message' => $e->getMessage() ?: 'Daily could not start cloud recording. Enable cloud recording on your Daily plan/domain.',
+                'message' => $message,
             ];
         }
     }
@@ -387,11 +398,39 @@ class DailyApiService
                 'result' => $result,
             ];
         } catch (\Throwable $e) {
+            $message = $e->getMessage() ?: 'Daily could not stop cloud recording.';
+            if ($this->isNoActiveStreamError($message)) {
+                return [
+                    'ok' => true,
+                    'status' => 'already_stopped',
+                    'message' => 'No active recording to stop.',
+                    'result' => ['info' => 'no_active_stream'],
+                ];
+            }
+
             return [
                 'ok' => false,
-                'message' => $e->getMessage() ?: 'Daily could not stop cloud recording.',
+                'message' => $message,
             ];
         }
+    }
+
+    protected function isAlreadyStreamingError(string $message): bool
+    {
+        $lower = strtolower($message);
+
+        return str_contains($lower, 'active stream')
+            || str_contains($lower, 'already recording')
+            || str_contains($lower, 'recording already');
+    }
+
+    protected function isNoActiveStreamError(string $message): bool
+    {
+        $lower = strtolower($message);
+
+        return str_contains($lower, 'no active')
+            || str_contains($lower, 'not recording')
+            || str_contains($lower, 'no recording');
     }
 
     public function generateRoomName(

@@ -238,6 +238,9 @@ class LiveZoomCohortController extends Controller
     {
         $this->authorizeCohort($request, $liveZoomCohort);
         try {
+            // Institution/main-platform meeting provider wins on each start.
+            $liveZoomCohort = $this->dailyService->syncProviderFromInstitution($liveZoomCohort);
+
             if ($this->dailyService->usesDaily($liveZoomCohort)) {
                 $daily = $this->dailyService->ensureDailyRoom($liveZoomCohort);
                 if (empty($daily['ok'])) {
@@ -245,13 +248,16 @@ class LiveZoomCohortController extends Controller
                 }
 
                 $liveZoomCohort->refresh();
+                $details = $daily['daily'] ?? $this->dailyService->formatDailyPayload($liveZoomCohort);
 
                 return response()->json([
                     'message' => ($daily['reused'] ?? false)
                         ? 'Live cohort session started (Daily).'
                         : 'Daily room created and session started. Share the join details with learners.',
                     'provider' => 'daily',
-                    'daily' => $daily['daily'] ?? $this->dailyService->formatDailyPayload($liveZoomCohort),
+                    'daily' => $details,
+                    // Same shape as Zoom so the frontend details dialog opens on first start.
+                    'zoom' => $details,
                     'session' => $this->queueService->startSession($liveZoomCohort),
                     'slot' => $liveZoomCohort->fresh(),
                 ]);
@@ -265,13 +271,15 @@ class LiveZoomCohortController extends Controller
             }
 
             $liveZoomCohort->refresh();
+            $details = $zoom['zoom'] ?? $this->zoomService->formatZoomPayload($liveZoomCohort);
+            $details['provider'] = 'zoom';
 
             return response()->json([
                 'message' => ($zoom['reused'] ?? false)
                     ? 'Live cohort session started.'
                     : 'Zoom meeting created and session started. Share the join details with learners.',
                 'provider' => 'zoom',
-                'zoom' => $zoom['zoom'] ?? $this->zoomService->formatZoomPayload($liveZoomCohort),
+                'zoom' => $details,
                 'session' => $this->queueService->startSession($liveZoomCohort),
                 'slot' => $liveZoomCohort->fresh(),
             ]);
@@ -282,12 +290,33 @@ class LiveZoomCohortController extends Controller
 
     public function zoomDetails(LiveZoomCohort $liveZoomCohort)
     {
+        if ($this->dailyService->usesDaily($liveZoomCohort)) {
+            if (trim((string) ($liveZoomCohort->daily_room_name ?? '')) === ''
+                && trim((string) ($liveZoomCohort->zoom_link ?? '')) === '') {
+                return response()->json([
+                    'message' => 'No live meeting has been created for this cohort yet. Start the session first.',
+                ], 404);
+            }
+
+            $details = $this->dailyService->formatDailyPayload($liveZoomCohort);
+
+            return response()->json([
+                'provider' => 'daily',
+                'zoom' => $details,
+                'slot' => $liveZoomCohort,
+            ]);
+        }
+
         if (trim((string) ($liveZoomCohort->zoom_link ?? '')) === '') {
             return response()->json(['message' => 'No Zoom meeting has been created for this cohort yet. Start the session first.'], 404);
         }
 
+        $details = $this->zoomService->formatZoomPayload($liveZoomCohort);
+        $details['provider'] = 'zoom';
+
         return response()->json([
-            'zoom' => $this->zoomService->formatZoomPayload($liveZoomCohort),
+            'provider' => 'zoom',
+            'zoom' => $details,
             'slot' => $liveZoomCohort,
         ]);
     }
@@ -1015,6 +1044,8 @@ class LiveZoomCohortController extends Controller
         if (($cohort->session_status ?? 'idle') === 'live') {
             return $cohort;
         }
+
+        $cohort = $this->dailyService->syncProviderFromInstitution($cohort);
 
         if ($this->dailyService->usesDaily($cohort)) {
             $daily = $this->dailyService->ensureDailyRoom($cohort);

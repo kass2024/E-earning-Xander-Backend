@@ -50,7 +50,7 @@
                                     <td style="padding-right:10px;">
                                         <a href="{{ $rebookUrl }}"
                                            style="display:inline-block;background:#012F6B;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 22px;border-radius:9999px;">
-                                            Book another meeting
+                                            Book another appointment
                                         </a>
                                     </td>
                                     @if(!empty($cancelUrl))
