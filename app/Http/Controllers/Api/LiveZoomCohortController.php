@@ -7,6 +7,8 @@ use App\Models\LiveZoomCohort;
 use App\Models\LiveZoomCohortQueueEntry;
 use App\Models\Student;
 use App\Models\User;
+use App\Enums\MeetingProvider;
+use App\Services\LiveZoomCohortDailyService;
 use App\Services\LiveZoomCohortQueueService;
 use App\Services\LiveZoomCohortZoomService;
 use App\Services\ZoomMeetingSdkService;
@@ -19,12 +21,14 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
 use Carbon\Carbon;
 use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Str;
 
 class LiveZoomCohortController extends Controller
 {
     public function __construct(
         protected LiveZoomCohortQueueService $queueService,
         protected LiveZoomCohortZoomService $zoomService,
+        protected LiveZoomCohortDailyService $dailyService,
         protected ZoomMeetingSdkService $meetingSdkService,
         protected ZoomService $zoomApi,
         protected ZoomMeetingBrandingResolver $brandingResolver,
@@ -143,6 +147,7 @@ class LiveZoomCohortController extends Controller
             'is_active' => 'nullable|boolean',
             'notes' => 'nullable|string|max:2000',
             'zoom_link' => 'nullable|url|max:2048',
+            'meeting_provider' => 'nullable|string|in:zoom,daily',
         ]);
 
         if (empty($data['day_of_week']) && empty($data['available_on_date'])) {
@@ -165,6 +170,16 @@ class LiveZoomCohortController extends Controller
 
         PlatformTenantScope::stampInstitutionId($request, $data);
 
+        if (Schema::hasColumn('livezoom_cohort', 'meeting_provider')) {
+            $provider = MeetingProvider::tryFromString($data['meeting_provider'] ?? null)
+                ?? $this->dailyService->defaultProviderForNewCohort(
+                    isset($data['platform_institution_id']) ? (int) $data['platform_institution_id'] : null
+                );
+            $data['meeting_provider'] = $provider->value;
+        } else {
+            unset($data['meeting_provider']);
+        }
+
         $slot = LiveZoomCohort::create($data);
 
         return response()->json([
@@ -185,6 +200,7 @@ class LiveZoomCohortController extends Controller
             'is_active' => 'nullable|boolean',
             'notes' => 'nullable|string|max:2000',
             'zoom_link' => 'nullable|url|max:2048',
+            'meeting_provider' => 'sometimes|string|in:zoom,daily',
         ]);
 
         $data = $this->syncDayOfWeek($data);
@@ -193,6 +209,10 @@ class LiveZoomCohortController extends Controller
             if ($data['end_time'] <= $data['start_time']) {
                 return response()->json(['message' => 'end_time must be after start_time'], 422);
             }
+        }
+
+        if (array_key_exists('meeting_provider', $data) && !Schema::hasColumn('livezoom_cohort', 'meeting_provider')) {
+            unset($data['meeting_provider']);
         }
 
         $liveZoomCohort->fill($data);
@@ -218,6 +238,25 @@ class LiveZoomCohortController extends Controller
     {
         $this->authorizeCohort($request, $liveZoomCohort);
         try {
+            if ($this->dailyService->usesDaily($liveZoomCohort)) {
+                $daily = $this->dailyService->ensureDailyRoom($liveZoomCohort);
+                if (empty($daily['ok'])) {
+                    return response()->json(['message' => $daily['message'] ?? 'Could not create Daily room.'], 422);
+                }
+
+                $liveZoomCohort->refresh();
+
+                return response()->json([
+                    'message' => ($daily['reused'] ?? false)
+                        ? 'Live cohort session started (Daily).'
+                        : 'Daily room created and session started. Share the join details with learners.',
+                    'provider' => 'daily',
+                    'daily' => $daily['daily'] ?? $this->dailyService->formatDailyPayload($liveZoomCohort),
+                    'session' => $this->queueService->startSession($liveZoomCohort),
+                    'slot' => $liveZoomCohort->fresh(),
+                ]);
+            }
+
             $this->assertZoomApiReady();
 
             $zoom = $this->zoomService->ensureZoomMeeting($liveZoomCohort);
@@ -231,6 +270,7 @@ class LiveZoomCohortController extends Controller
                 'message' => ($zoom['reused'] ?? false)
                     ? 'Live cohort session started.'
                     : 'Zoom meeting created and session started. Share the join details with learners.',
+                'provider' => 'zoom',
                 'zoom' => $zoom['zoom'] ?? $this->zoomService->formatZoomPayload($liveZoomCohort),
                 'session' => $this->queueService->startSession($liveZoomCohort),
                 'slot' => $liveZoomCohort->fresh(),
@@ -430,8 +470,6 @@ class LiveZoomCohortController extends Controller
     public function participantSdkAuth(Request $request, LiveZoomCohort $liveZoomCohort)
     {
         try {
-            $this->assertZoomProductionReady();
-
             $participant = $this->resolveParticipant($request, false);
             $status = $this->queueService->queueStatus(
                 $liveZoomCohort,
@@ -455,8 +493,6 @@ class LiveZoomCohortController extends Controller
                 $liveZoomCohort = $this->ensureLiveSessionWithMeeting($liveZoomCohort);
             }
 
-            [$liveZoomCohort, $meetingDetails] = $this->zoomService->resolveCohortForSdkAuth($liveZoomCohort->fresh());
-
             $displayName = $participant['display_name'] ?: ($entry['display_name'] ?? 'Guest');
             $avatarUrl = null;
             if (!empty($participant['student_id'])) {
@@ -465,6 +501,47 @@ class LiveZoomCohortController extends Controller
                     $avatarUrl = (string) $student->avatar;
                 }
             }
+
+            $cohortTitle = trim((string) ($liveZoomCohort->notes ?? ''));
+            if ($cohortTitle === '') {
+                $cohortTitle = 'Live cohort #' . $liveZoomCohort->id;
+            }
+
+            $branding = $this->brandingResolver->resolve(null, null, $liveZoomCohort);
+
+            if ($this->dailyService->usesDaily($liveZoomCohort)) {
+                $daily = $this->dailyService->ensureDailyRoom($liveZoomCohort);
+                if (empty($daily['ok'])) {
+                    return response()->json(['message' => $daily['message'] ?? 'Could not prepare Daily room.'], 422);
+                }
+                $liveZoomCohort = $liveZoomCohort->fresh();
+
+                $userId = !empty($participant['student_id'])
+                    ? 'student-' . $participant['student_id']
+                    : ('guest-' . substr((string) ($participant['guest_token'] ?? Str::random(8)), 0, 24));
+
+                $payload = $this->dailyService->buildSdkPayload(
+                    $liveZoomCohort,
+                    $displayName,
+                    $userId,
+                    false,
+                );
+
+                return response()->json(array_merge([
+                    'provider' => 'daily',
+                    'sdk' => $payload,
+                    'entry' => $entry,
+                    'participant' => [
+                        'name' => $displayName,
+                        'avatar_url' => $avatarUrl,
+                    ],
+                    'cohort_title' => $cohortTitle,
+                ], $branding));
+            }
+
+            $this->assertZoomProductionReady();
+
+            [$liveZoomCohort, $meetingDetails] = $this->zoomService->resolveCohortForSdkAuth($liveZoomCohort->fresh());
 
             $password = $this->zoomApi->resolveMeetingPassword($liveZoomCohort, $meetingDetails);
             $passwordCandidates = $this->zoomApi->resolveJoinPasswordCandidates($liveZoomCohort, $meetingDetails);
@@ -487,14 +564,8 @@ class LiveZoomCohortController extends Controller
             );
             $payload['password_candidates'] = $passwordCandidates;
 
-            $cohortTitle = trim((string) ($liveZoomCohort->notes ?? ''));
-            if ($cohortTitle === '') {
-                $cohortTitle = 'Live Zoom Cohort #' . $liveZoomCohort->id;
-            }
-
-            $branding = $this->brandingResolver->resolve(null, null, $liveZoomCohort);
-
             return response()->json(array_merge([
+                'provider' => 'zoom',
                 'sdk' => $payload,
                 'entry' => $entry,
                 'participant' => [
@@ -511,24 +582,92 @@ class LiveZoomCohortController extends Controller
     public function hostSdkAuth(Request $request, LiveZoomCohort $liveZoomCohort)
     {
         try {
-            $this->assertZoomProductionReady();
-
             $hostEmail = PlatformTenantScope::resolveActorEmail($request) ?: trim((string) $request->input('host_email', ''));
+            $usesDaily = $this->dailyService->usesDaily($liveZoomCohort);
 
             if (($liveZoomCohort->session_status ?? 'idle') !== 'live') {
-                $zoom = $this->zoomService->ensureZoomMeeting(
-                    $liveZoomCohort,
-                    false,
-                    null,
-                    $hostEmail !== '' ? $hostEmail : null,
-                );
-                if (empty($zoom['ok'])) {
-                    return response()->json(['message' => $zoom['message'] ?? 'Could not prepare Zoom meeting.'], 422);
+                if ($usesDaily) {
+                    $daily = $this->dailyService->ensureDailyRoom($liveZoomCohort);
+                    if (empty($daily['ok'])) {
+                        return response()->json(['message' => $daily['message'] ?? 'Could not prepare Daily room.'], 422);
+                    }
+                    $liveZoomCohort = $liveZoomCohort->fresh();
+                    $this->queueService->startSession($liveZoomCohort);
+                    $liveZoomCohort = $liveZoomCohort->fresh();
+                } else {
+                    $this->assertZoomProductionReady();
+                    $zoom = $this->zoomService->ensureZoomMeeting(
+                        $liveZoomCohort,
+                        false,
+                        null,
+                        $hostEmail !== '' ? $hostEmail : null,
+                    );
+                    if (empty($zoom['ok'])) {
+                        return response()->json(['message' => $zoom['message'] ?? 'Could not prepare Zoom meeting.'], 422);
+                    }
+                    $liveZoomCohort = $liveZoomCohort->fresh();
+                    $this->queueService->startSession($liveZoomCohort);
+                    $liveZoomCohort = $liveZoomCohort->fresh();
+                }
+            }
+
+            $cohortTitle = trim((string) ($liveZoomCohort->notes ?? ''));
+            if ($cohortTitle === '') {
+                $cohortTitle = 'Live cohort #' . $liveZoomCohort->id;
+            }
+
+            $hostContext = $this->resolveHostContext($request, $liveZoomCohort);
+            $actorEmail = PlatformTenantScope::resolveActorEmail($request) ?: $hostContext['email'];
+            $branding = $this->brandingResolver->resolve(
+                $actorEmail,
+                $liveZoomCohort->platform_institution_id ? (int) $liveZoomCohort->platform_institution_id : null,
+                $liveZoomCohort,
+            );
+            $branding['host']['email'] = $hostContext['email'];
+            $actorUser = $actorEmail
+                ? User::query()->whereRaw('LOWER(email) = ?', [strtolower(trim($actorEmail))])->first()
+                : null;
+            $branding = $this->brandingResolver->finalizeHostSdkBranding(
+                $branding,
+                $hostContext,
+                $actorUser,
+            );
+            $hostName = trim((string) ($branding['host']['name'] ?? $hostContext['name']));
+            if ($branding['use_institution_logo'] ?? false) {
+                $institutionName = trim((string) ($branding['institution']['name'] ?? $branding['company']['name'] ?? ''));
+                $hostName = $institutionName !== '' ? $institutionName : 'Host';
+            } elseif (!empty($branding['is_main_platform_host']) || !empty($branding['use_hub_branding'])) {
+                $hostName = $this->brandingResolver->platformCompanyNameForResponse();
+            }
+
+            if ($this->dailyService->usesDaily($liveZoomCohort)) {
+                // Always validate/refresh Daily room (handles expiry + missing URL).
+                $daily = $this->dailyService->ensureDailyRoom($liveZoomCohort);
+                if (empty($daily['ok'])) {
+                    return response()->json(['message' => $daily['message'] ?? 'Could not prepare Daily room.'], 422);
                 }
                 $liveZoomCohort = $liveZoomCohort->fresh();
-                $this->queueService->startSession($liveZoomCohort);
-                $liveZoomCohort = $liveZoomCohort->fresh();
+
+                $payload = $this->dailyService->buildSdkPayload(
+                    $liveZoomCohort,
+                    $hostName,
+                    'host-' . ($hostContext['email'] ?: ('cohort-' . $liveZoomCohort->id)),
+                    true,
+                );
+
+                return response()->json(array_merge([
+                    'provider' => 'daily',
+                    'sdk' => $payload,
+                    'queue' => $this->queueService->adminQueue($liveZoomCohort),
+                    'meeting_id' => $liveZoomCohort->daily_room_name,
+                    'meeting_refreshed' => false,
+                    'daily' => $this->dailyService->formatDailyPayload($liveZoomCohort),
+                    'backend_app' => (string) config('app.name'),
+                    'cohort_title' => $cohortTitle,
+                ], $branding));
             }
+
+            $this->assertZoomProductionReady();
 
             if ($request->boolean('force_refresh') || $request->boolean('meeting_stale')) {
                 $liveZoomCohort = $this->zoomService->refreshMeetingForSdk($liveZoomCohort);
@@ -541,7 +680,6 @@ class LiveZoomCohortController extends Controller
                 $institutionId = $liveZoomCohort->platform_institution_id
                     ? (int) $liveZoomCohort->platform_institution_id
                     : null;
-                $actorUser = $request->user();
                 $this->zoomApi->invalidateHostUserCache(
                     $institutionId,
                     $actorUser?->id ? (int) $actorUser->id : null,
@@ -553,47 +691,15 @@ class LiveZoomCohortController extends Controller
                 return response()->json(['message' => 'Start the cohort session first to create a Zoom meeting.'], 422);
             }
 
-            $hostContext = $this->resolveHostContext($request, $liveZoomCohort);
-
             $password = $this->zoomApi->resolveMeetingPassword(
                 $liveZoomCohort,
-                is_array($meetingDetails) ? $meetingDetails : null,
+                is_array($meetingDetails ?? null) ? $meetingDetails : null,
             );
             $passwordCandidates = $this->zoomApi->resolveJoinPasswordCandidates(
                 $liveZoomCohort,
-                is_array($meetingDetails) ? $meetingDetails : null,
+                is_array($meetingDetails ?? null) ? $meetingDetails : null,
             );
 
-            $cohortTitle = trim((string) ($liveZoomCohort->notes ?? ''));
-            if ($cohortTitle === '') {
-                $cohortTitle = 'Live Zoom Cohort #' . $liveZoomCohort->id;
-            }
-
-            $actorEmail = PlatformTenantScope::resolveActorEmail($request) ?: $hostContext['email'];
-
-            $branding = $this->brandingResolver->resolve(
-                $actorEmail,
-                $liveZoomCohort->platform_institution_id ? (int) $liveZoomCohort->platform_institution_id : null,
-                $liveZoomCohort,
-            );
-            $branding['host']['email'] = $hostContext['email'];
-
-            $actorUser = $actorEmail
-                ? User::query()->whereRaw('LOWER(email) = ?', [strtolower(trim($actorEmail))])->first()
-                : null;
-            $branding = $this->brandingResolver->finalizeHostSdkBranding(
-                $branding,
-                $hostContext,
-                $actorUser,
-            );
-
-            $hostName = trim((string) ($branding['host']['name'] ?? $hostContext['name']));
-            if ($branding['use_institution_logo'] ?? false) {
-                $institutionName = trim((string) ($branding['institution']['name'] ?? $branding['company']['name'] ?? ''));
-                $hostName = $institutionName !== '' ? $institutionName : 'Host';
-            }
-
-            // Embedded Meeting SDK: same-account host uses role=1 JWT signature (no ZAK).
             $payload = $this->meetingSdkService->buildJoinPayload(
                 (string) $liveZoomCohort->zoom_meeting_id,
                 $hostName,
@@ -605,6 +711,7 @@ class LiveZoomCohortController extends Controller
             $payload['password_candidates'] = $passwordCandidates;
 
             return response()->json(array_merge([
+                'provider' => 'zoom',
                 'sdk' => $payload,
                 'queue' => $this->queueService->adminQueue($liveZoomCohort),
                 'meeting_id' => $liveZoomCohort->zoom_meeting_id,
@@ -623,6 +730,31 @@ class LiveZoomCohortController extends Controller
         $data = $request->validate([
             'action' => 'required|string|in:start,stop,pause,resume',
         ]);
+
+        if ($this->dailyService->usesDaily($liveZoomCohort)) {
+            $roomName = trim((string) ($liveZoomCohort->daily_room_name ?? ''));
+            if ($roomName === '') {
+                return response()->json(['message' => 'No active Daily room for this cohort. Start the session first.'], 422);
+            }
+
+            /** @var \App\Services\Meetings\DailyMeetingProvider $dailyProvider */
+            $dailyProvider = app(\App\Services\Meetings\DailyMeetingProvider::class);
+            $result = $dailyProvider->toggleCloudRecording($roomName, $data['action']);
+            if (empty($result['ok'])) {
+                return response()->json([
+                    'message' => $result['message']
+                        ?? 'Daily recording failed. Enable cloud recording on your Daily plan and set DAILY_RECORDING_ENABLED=true.',
+                    'details' => $result['result'] ?? null,
+                ], 422);
+            }
+
+            return response()->json([
+                'message' => 'Daily recording ' . $data['action'] . ' request sent.',
+                'provider' => 'daily',
+                'room_name' => $roomName,
+                'result' => $result['result'] ?? $result,
+            ]);
+        }
 
         $meetingId = trim((string) ($liveZoomCohort->zoom_meeting_id ?? ''));
         if ($meetingId === '') {
@@ -647,6 +779,7 @@ class LiveZoomCohortController extends Controller
 
         return response()->json([
             'message' => 'Recording ' . $data['action'] . ' request sent.',
+            'provider' => 'zoom',
             'result' => $result,
         ]);
     }
@@ -881,6 +1014,17 @@ class LiveZoomCohortController extends Controller
     {
         if (($cohort->session_status ?? 'idle') === 'live') {
             return $cohort;
+        }
+
+        if ($this->dailyService->usesDaily($cohort)) {
+            $daily = $this->dailyService->ensureDailyRoom($cohort);
+            if (empty($daily['ok'])) {
+                throw new \RuntimeException($daily['message'] ?? 'Could not prepare Daily room.');
+            }
+            $cohort = $cohort->fresh();
+            $this->queueService->startSession($cohort);
+
+            return $cohort->fresh();
         }
 
         $this->assertZoomApiReady();

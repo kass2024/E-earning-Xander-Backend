@@ -14,12 +14,18 @@ class MeetingRegistrationJoinUrl
         ?string $userName = null,
         ?string $userEmail = null,
     ): string {
+        $raw = trim($meetingId);
+        // Daily room names stay intact; Zoom IDs are digits-only.
+        $isDailyRoom = (bool) preg_match('/^(webinar-|daily-|inst-|cohort-)/i', $raw)
+            || (!preg_match('/^\d{9,15}$/', $raw) && preg_match('/[a-zA-Z_-]/', $raw));
+        $meetingNumber = $isDailyRoom ? $raw : preg_replace('/\D+/', '', $raw);
+
         $params = [
-            'meeting_number' => preg_replace('/\D+/', '', $meetingId),
+            'meeting_number' => $meetingNumber,
             'role' => '0',
         ];
 
-        if ($password) {
+        if ($password && !$isDailyRoom) {
             $params['password'] = $password;
         }
         if ($userName) {

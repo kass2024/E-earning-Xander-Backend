@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\CourseController;
 use App\Http\Controllers\Api\CourseMaterialController;
 use App\Http\Controllers\Api\ZoomController;
 use App\Http\Controllers\Api\ZoomEmbedController;
+use App\Http\Controllers\Api\DailyWebhookController;
 use App\Http\Controllers\Api\StudentDashboardController;
 use App\Http\Controllers\Api\LearnerExtrasController;
 use App\Http\Controllers\Api\MeetingRegistrationController;
@@ -351,6 +352,9 @@ Route::prefix('admin')->group(function () {
     /*** ---------------- ZOOM ---------------- ***/
     Route::get('zoom/meetings', [ZoomController::class, 'listMeetings']);
     Route::get('zoom/hosts', [ZoomController::class, 'listHosts']);
+    Route::get('meeting-providers/status', [ZoomController::class, 'meetingProviderStatus']);
+    Route::get('platform/meeting-settings', [\App\Http\Controllers\Api\PlatformMeetingSettingsController::class, 'show']);
+    Route::patch('platform/meeting-settings', [\App\Http\Controllers\Api\PlatformMeetingSettingsController::class, 'update']);
     Route::get('zoom/embed/config', [ZoomEmbedController::class, 'config']);
     Route::post('zoom/embed/auth', [ZoomEmbedController::class, 'auth']);
     Route::post('zoom/meetings', [ZoomController::class, 'createMeeting']);
@@ -376,3 +380,5 @@ Route::prefix('admin')->group(function () {
     });
 
 });
+
+Route::post('webhooks/daily', [DailyWebhookController::class, 'handle']);

@@ -7,8 +7,11 @@ use App\Mail\InstitutionPaymentReminderMail;
 use App\Models\InstitutionPromoCode;
 use App\Models\PlatformInstitution;
 use App\Models\User;
-use App\Services\InstitutionSignupService;
+use App\Enums\MeetingProvider;
+use App\Services\Meetings\MeetingProviderManager;
+use App\Services\Meetings\MeetingProviderStatusService;
 use App\Services\InstitutionMailResolver;
+use App\Services\InstitutionSignupService;
 use App\Services\MailDeliveryService;
 use App\Services\ZoomHostAssignmentService;
 use App\Support\PlatformInstitutionHelper;
@@ -23,6 +26,8 @@ class PlatformInstitutionController extends Controller
         private readonly InstitutionMailResolver $mailResolver,
         private readonly MailDeliveryService $mailDelivery,
         private readonly ZoomHostAssignmentService $zoomHostAssignment,
+        private readonly MeetingProviderManager $meetingProviders,
+        private readonly MeetingProviderStatusService $meetingProviderStatus,
     ) {}
 
     public function index()
@@ -160,15 +165,60 @@ class PlatformInstitutionController extends Controller
 
     public function backfillZoomHosts(Request $request)
     {
-        $dryRun = $request->boolean('dry_run');
-        $results = $this->zoomHostAssignment->backfillMissingHosts($dryRun);
+        try {
+            $dryRun = $request->boolean('dry_run');
+            $results = $this->zoomHostAssignment->backfillMissingHosts($dryRun);
+            $inventory = $this->zoomHostAssignment->getHostInventory();
+            $assignedCount = count(array_filter($results, static fn ($row) => !empty($row['assigned'])));
 
-        return response()->json([
-            'message' => $dryRun ? 'Preview complete' : 'Backfill complete',
-            'dry_run' => $dryRun,
-            'results' => $results,
-            'inventory' => $this->zoomHostAssignment->getHostInventory(),
-        ]);
+            if (!$dryRun && $assignedCount === 0 && $results !== []) {
+                return response()->json([
+                    'message' => 'No free Zoom hosts were available for the remaining institutions. Add licensed users in Zoom Admin, or set ZOOM_HOST_POOL in server .env.',
+                    'error_code' => 'no_zoom_hosts_available',
+                    'dry_run' => $dryRun,
+                    'results' => $results,
+                    'inventory' => $inventory,
+                ], 422);
+            }
+
+            return response()->json([
+                'message' => $dryRun ? 'Preview complete' : 'Backfill complete',
+                'dry_run' => $dryRun,
+                'results' => $results,
+                'inventory' => $inventory,
+            ]);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'message' => $this->friendlyZoomBackfillError($e),
+                'error_code' => 'zoom_host_backfill_failed',
+            ], 500);
+        }
+    }
+
+    protected function friendlyZoomBackfillError(\Throwable $e): string
+    {
+        $raw = trim($e->getMessage());
+
+        if (str_contains($raw, 'Target class') || str_contains($raw, 'does not exist')) {
+            return 'Server setup issue: a required service class is missing. Run composer dump-autoload on the API server, then try again.';
+        }
+
+        if (str_contains(strtolower($raw), 'zoom') && (
+            str_contains(strtolower($raw), 'credential')
+            || str_contains(strtolower($raw), 'oauth')
+            || str_contains(strtolower($raw), 'unauthorized')
+            || str_contains(strtolower($raw), 'invalid access token')
+        )) {
+            return 'Zoom API is not configured correctly. Check ZOOM_ACCOUNT_ID, ZOOM_CLIENT_ID, and ZOOM_CLIENT_SECRET on the server.';
+        }
+
+        if (str_contains(strtolower($raw), 'user:read:list_users')) {
+            return 'Zoom app is missing the user:read:list_users:admin scope. Add it in the Zoom Marketplace app, then retry.';
+        }
+
+        return 'Could not assign Zoom hosts automatically. Verify Zoom credentials on the server and that licensed host users exist in your Zoom account.';
     }
 
     public function resendCredentials(PlatformInstitution $platformInstitution)
@@ -247,6 +297,7 @@ class PlatformInstitutionController extends Controller
                 'email' => $platformInstitution->owner->email,
                 'status' => $platformInstitution->owner->status,
             ] : null,
+            'meeting_provider_status' => $this->meetingProviderStatus->summary(),
         ]));
     }
 
@@ -269,6 +320,7 @@ class PlatformInstitutionController extends Controller
             'mail_from_name' => 'nullable|string|max:255',
             'mail_ehlo_domain' => 'nullable|string|max:255',
             'zoom_host_user_id' => 'nullable|string|max:255',
+            'meeting_provider' => 'sometimes|string|in:zoom,daily',
         ]);
 
         if (array_key_exists('mail_password', $data)) {
@@ -284,6 +336,21 @@ class PlatformInstitutionController extends Controller
             $data['mail_encryption'] = null;
         }
 
+        if (array_key_exists('meeting_provider', $data)) {
+            $provider = MeetingProvider::fromStringOrDefault($data['meeting_provider']);
+            if (!(bool) config('services.daily.integration_enabled', false) && $provider === MeetingProvider::Daily) {
+                return response()->json([
+                    'message' => 'Daily integration is disabled. Set DAILY_INTEGRATION_ENABLED=true and configure Daily credentials.',
+                ], 422);
+            }
+            try {
+                $this->meetingProviders->assertSelectable($provider);
+            } catch (\InvalidArgumentException $e) {
+                return response()->json(['message' => $e->getMessage()], 422);
+            }
+            $data['meeting_provider'] = $provider->value;
+        }
+
         $platformInstitution->fill($data);
         $platformInstitution->save();
 
@@ -294,6 +361,7 @@ class PlatformInstitutionController extends Controller
         return response()->json([
             'message' => 'Institution updated',
             'institution' => $platformInstitution->fresh()->toAdminArray(),
+            'meeting_provider_status' => $this->meetingProviderStatus->summary(),
         ]);
     }
 

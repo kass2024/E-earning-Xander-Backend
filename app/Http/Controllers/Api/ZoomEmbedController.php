@@ -9,6 +9,8 @@ use App\Models\Student;
 use App\Models\User;
 use App\Models\WebinarSetting;
 use App\Services\LiveClassLobbyService;
+use App\Services\Meetings\LiveMeetingJoinService;
+use App\Services\Meetings\WebinarDailyService;
 use App\Services\ZoomMeetingSdkService;
 use App\Services\ZoomService;
 use App\Support\CourseMaterialHelper;
@@ -28,6 +30,8 @@ class ZoomEmbedController extends Controller
         protected ZoomService $zoomService,
         protected ZoomMeetingBrandingResolver $brandingResolver,
         protected LiveClassLobbyService $lobbyService,
+        protected LiveMeetingJoinService $liveMeetingJoin,
+        protected WebinarDailyService $webinarDaily,
     ) {
     }
 
@@ -51,7 +55,7 @@ class ZoomEmbedController extends Controller
     {
         $data = $request->validate([
             'material_id' => 'nullable|integer|exists:course_materials,id',
-            'meeting_number' => 'nullable|string|max:32',
+            'meeting_number' => 'nullable|string|max:120',
             'user_name' => 'nullable|string|max:120',
             'role' => 'nullable|integer|in:0,1',
             'password' => 'nullable|string|max:64',
@@ -76,8 +80,13 @@ class ZoomEmbedController extends Controller
             return $this->buildWebinarHostAuth($data);
         }
 
-        $meetingNumber = preg_replace('/\D+/', '', (string) ($data['meeting_number'] ?? ''));
-        if ($meetingNumber === '') {
+        $rawMeetingNumber = trim((string) ($data['meeting_number'] ?? ''));
+        // Daily room names are alphanumeric; Zoom IDs are numeric-only.
+        $dailyRoom = $this->webinarDaily->isDailyRoomName($rawMeetingNumber)
+            ? $rawMeetingNumber
+            : null;
+        $meetingNumber = $dailyRoom ?? preg_replace('/\D+/', '', $rawMeetingNumber);
+        if ($meetingNumber === '' || $meetingNumber === null) {
             return response()->json(['message' => 'Provide material_id, meeting_number, or webinar_host.'], 422);
         }
 
@@ -94,6 +103,45 @@ class ZoomEmbedController extends Controller
         $actorUser = $actorEmail
             ? User::query()->whereRaw('LOWER(email) = ?', [strtolower(trim($actorEmail))])->first()
             : null;
+
+        if ($dailyRoom) {
+            $settings = WebinarSetting::current();
+            if (trim((string) ($settings->zoom_meeting_id ?? '')) !== $dailyRoom) {
+                // Allow joining by Daily room name even if settings drifted.
+                $settings->zoom_meeting_id = $dailyRoom;
+                if (trim((string) ($settings->zoom_join_url ?? '')) === '' || !str_contains(strtolower((string) $settings->zoom_join_url), 'daily.co')) {
+                    $settings->zoom_join_url = app(\App\Services\Meetings\DailyApiService::class)->roomUrl($dailyRoom);
+                }
+            }
+            try {
+                $dailySdk = $this->webinarDaily->buildSdkPayload(
+                    $settings,
+                    $userName,
+                    $actorEmail ?: ('guest-' . substr(md5($userName . microtime(true)), 0, 10)),
+                    $role === 1,
+                );
+            } catch (\Throwable $e) {
+                return response()->json(['message' => $e->getMessage()], 422);
+            }
+
+            $branding = $this->meetingBrandingPayload($actorEmail, $platformInstitutionId);
+            if ($role === 1) {
+                $zoomHost = $this->zoomService->resolveConfiguredHostBranding(
+                    $platformInstitutionId,
+                    $actorUser?->id ? (int) $actorUser->id : null,
+                    $actorEmail,
+                );
+                $branding = $this->brandingResolver->finalizeHostSdkBranding($branding, $zoomHost, $actorUser);
+                if ($branding['use_institution_logo'] ?? false) {
+                    $dailySdk['user_name'] = $this->institutionHostJoinName($branding);
+                }
+            }
+
+            return response()->json(array_merge([
+                'provider' => 'daily',
+                'sdk' => $dailySdk,
+            ], $branding));
+        }
 
         if ($role === 1) {
             $userName = $this->resolveZoomHostJoinName(
@@ -141,12 +189,12 @@ class ZoomEmbedController extends Controller
         }
 
         if ($role === 1) {
-            $response = ['sdk' => $payload];
+            $response = ['provider' => 'zoom', 'sdk' => $payload];
             $response = array_merge($response, $branding);
             return response()->json($response);
         }
 
-        return response()->json(array_merge(['sdk' => $payload], $branding));
+        return response()->json(array_merge(['provider' => 'zoom', 'sdk' => $payload], $branding));
     }
 
     public function learnerMaterialAuth(Request $request, CourseMaterial $material): JsonResponse
@@ -204,9 +252,13 @@ class ZoomEmbedController extends Controller
             return response()->json(['message' => 'This material is not a live class.'], 422);
         }
 
-        $meetingId = CourseMaterialHelper::meetingId($material);
-        if (!$meetingId) {
-            return response()->json(['message' => 'No Zoom meeting ID for this session.'], 422);
+        $isDaily = CourseMaterialHelper::isDailyMeeting($material);
+
+        if (!$isDaily) {
+            $meetingId = CourseMaterialHelper::meetingId($material);
+            if (!$meetingId) {
+                return response()->json(['message' => 'No Zoom meeting ID for this session.'], 422);
+            }
         }
 
         if ($role === 1) {
@@ -289,6 +341,80 @@ class ZoomEmbedController extends Controller
             }
         }
 
+        if ($isDaily) {
+            $platformInstitutionId = isset($data['platform_institution_id'])
+                ? (int) $data['platform_institution_id']
+                : null;
+            $actorEmail = trim((string) ($data['user_email'] ?? $data['instructor_email'] ?? $joinUserEmail ?? ''));
+            $actorEmail = $actorEmail !== '' ? $actorEmail : null;
+            $actorUser = $actorEmail
+                ? User::query()->whereRaw('LOWER(TRIM(email)) = ?', [strtolower(trim($actorEmail))])->first()
+                : null;
+            if (!$platformInstitutionId && !empty($material->course?->platform_institution_id)) {
+                if (!$actorUser || !PlatformInstitutionHelper::isMainPlatformAdmin($actorUser)) {
+                    $platformInstitutionId = (int) $material->course->platform_institution_id;
+                }
+            }
+
+            $branding = [];
+            if ($role === 1) {
+                $zoomHost = $this->zoomService->resolveConfiguredHostBranding(
+                    $platformInstitutionId,
+                    $actorUser?->id ? (int) $actorUser->id : null,
+                    $actorEmail,
+                );
+                $branding = $this->meetingBrandingPayload($actorEmail, $platformInstitutionId);
+                $branding = $this->brandingResolver->finalizeHostSdkBranding(
+                    $branding,
+                    $zoomHost,
+                    $actorUser,
+                );
+                if ($branding['use_institution_logo'] ?? false) {
+                    $userName = $this->institutionHostJoinName($branding);
+                } else {
+                    $userName = $this->brandingResolver->platformCompanyNameForResponse();
+                }
+                if (!empty($branding['host']['avatar_url'])) {
+                    $participantAvatar = $branding['host']['avatar_url'];
+                }
+            }
+
+            try {
+                $participantId = $role === 1
+                    ? ('instructor-' . ($joinUserEmail ?? 'host'))
+                    : ('student-' . (string) ($data['student_id'] ?? $data['learner_email'] ?? 'guest'));
+                $dailySdk = $this->liveMeetingJoin->buildDailySdkPayload(
+                    $material,
+                    $userName,
+                    (string) $participantId,
+                    $role === 1 && empty($data['preview']),
+                );
+            } catch (\Throwable $e) {
+                return response()->json(['message' => $e->getMessage()], 422);
+            }
+
+            return response()->json(array_merge([
+                'provider' => 'daily',
+                'sdk' => $dailySdk,
+                'material' => [
+                    'id' => $material->id,
+                    'title' => $material->title,
+                    'course_title' => $material->course?->title,
+                    'recording_enabled' => (bool) (
+                        data_get($material->metadata, 'recording_enabled')
+                        ?? data_get($material->metadata, 'auto_recording', false)
+                    ),
+                ],
+                'preview' => !empty($data['preview']),
+                'participant' => [
+                    'name' => $userName,
+                    'avatar_url' => $participantAvatar ?? null,
+                ],
+            ], $branding));
+        }
+
+        $meetingId = CourseMaterialHelper::meetingId($material);
+
         $meetingDetails = null;
         $fetched = $this->zoomService->getMeeting($meetingId);
         if (is_array($fetched) && empty($fetched['error'])) {
@@ -356,6 +482,7 @@ class ZoomEmbedController extends Controller
         }
 
         return response()->json(array_merge([
+            'provider' => 'zoom',
             'sdk' => $payload,
             'material' => [
                 'id' => $material->id,
@@ -380,10 +507,6 @@ class ZoomEmbedController extends Controller
     protected function buildWebinarHostAuth(array $data): JsonResponse
     {
         $settings = WebinarSetting::current();
-        $meetingId = trim((string) ($settings->zoom_meeting_id ?? ''));
-        if ($meetingId === '') {
-            return response()->json(['message' => 'No webinar meeting configured. Prepare the webinar first.'], 422);
-        }
 
         $platformInstitutionId = isset($data['platform_institution_id'])
             ? (int) $data['platform_institution_id']
@@ -420,6 +543,38 @@ class ZoomEmbedController extends Controller
             $userName = $this->institutionHostJoinName($branding);
         }
 
+        // Prefer Daily when platform provider is Daily (or an existing Daily webinar room).
+        if ($this->webinarDaily->shouldUseDaily() || $this->webinarDaily->isDailyWebinar($settings)) {
+            if (trim((string) ($settings->zoom_meeting_id ?? '')) === '' || !$this->webinarDaily->isDailyWebinar($settings)) {
+                $ensured = $this->webinarDaily->ensureRoom($settings, $platformInstitutionId);
+                if (!$ensured['ok']) {
+                    return response()->json(['message' => $ensured['message'] ?? 'Could not prepare Daily webinar room.'], 422);
+                }
+                $settings = $ensured['settings'];
+            }
+
+            try {
+                $dailySdk = $this->webinarDaily->buildSdkPayload(
+                    $settings,
+                    $userName,
+                    $actorEmail ?: ('host-' . ($actorUser?->id ?? 'webinar')),
+                    true,
+                );
+            } catch (\Throwable $e) {
+                return response()->json(['message' => $e->getMessage()], 422);
+            }
+
+            return response()->json(array_merge([
+                'provider' => 'daily',
+                'sdk' => $dailySdk,
+            ], $branding));
+        }
+
+        $meetingId = trim((string) ($settings->zoom_meeting_id ?? ''));
+        if ($meetingId === '') {
+            return response()->json(['message' => 'No webinar meeting configured. Prepare the webinar first.'], 422);
+        }
+
         $meetingDetails = $this->fetchMeetingDetailsForSdk($meetingId);
         $joinPasswords = $this->resolveSdkJoinPasswords($meetingId, null, $settings, $meetingDetails);
         $this->persistWebinarPasswordIfResolved($settings, $joinPasswords);
@@ -441,7 +596,7 @@ class ZoomEmbedController extends Controller
         $payload['password_candidates'] = $joinPasswords['candidates'];
 
         return response()->json(array_merge(
-            ['sdk' => $payload],
+            ['provider' => 'zoom', 'sdk' => $payload],
             $branding,
         ));
     }

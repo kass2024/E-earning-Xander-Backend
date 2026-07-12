@@ -6,6 +6,14 @@ use App\Services\DatabaseSchemaService;
 use App\Services\InstitutionMailResolver;
 use App\Services\MailDeliveryService;
 use App\Services\StripePaymentService;
+use App\Services\Meetings\MeetingProviderManager;
+use App\Services\Meetings\MeetingProviderStatusService;
+use App\Services\Meetings\DailyWebhookEventDispatcher;
+use App\Services\Meetings\DailyWebhookSignatureVerifier;
+use App\Services\Meetings\DailyApiService;
+use App\Services\Meetings\DailyMeetingProvider;
+use App\Services\Meetings\ZoomMeetingProvider;
+use App\Services\Meetings\LiveMeetingJoinService;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
 
@@ -17,6 +25,14 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(MailDeliveryService::class);
         $this->app->singleton(InstitutionMailResolver::class);
         $this->app->singleton(StripePaymentService::class);
+        $this->app->singleton(DailyApiService::class);
+        $this->app->singleton(DailyWebhookSignatureVerifier::class);
+        $this->app->singleton(DailyWebhookEventDispatcher::class);
+        $this->app->singleton(DailyMeetingProvider::class);
+        $this->app->singleton(ZoomMeetingProvider::class);
+        $this->app->singleton(MeetingProviderStatusService::class);
+        $this->app->singleton(MeetingProviderManager::class);
+        $this->app->singleton(LiveMeetingJoinService::class);
     }
 
     public function boot(): void

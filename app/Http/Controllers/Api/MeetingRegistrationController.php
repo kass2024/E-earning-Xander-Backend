@@ -13,6 +13,7 @@ use App\Models\MeetingRegistration;
 use App\Models\User;
 use App\Models\WebinarSetting;
 use App\Services\ZoomService;
+use App\Services\Meetings\WebinarDailyService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -31,10 +32,13 @@ class MeetingRegistrationController extends Controller
 
     protected MailDeliveryService $mail;
 
-    public function __construct(ZoomService $zoom, MailDeliveryService $mail)
+    protected WebinarDailyService $webinarDaily;
+
+    public function __construct(ZoomService $zoom, MailDeliveryService $mail, WebinarDailyService $webinarDaily)
     {
         $this->zoom = $zoom;
         $this->mail = $mail;
+        $this->webinarDaily = $webinarDaily;
     }
 
     private function getNextWebinarStartTime(): Carbon
@@ -862,18 +866,27 @@ class MeetingRegistrationController extends Controller
         $settings = WebinarSetting::current();
         $approvedCount = $this->approvedRegistrationCount();
         $share = $this->webinarSharePayload($settings);
+        $isDaily = $this->webinarDaily->isDailyWebinar($settings) || $this->webinarDaily->shouldUseDaily();
 
         return response()->json(array_merge([
             'approved_participants' => $approvedCount,
             'can_start' => $approvedCount > 0,
             'recording_enabled' => (bool) $settings->recording_enabled,
-            'join_url' => $settings->zoom_join_url,
-            'start_url' => $this->resolvePathwaysStartUrl($settings),
+            'join_url' => $isDaily
+                ? ($share['app_participant_join_url'] ?? $settings->zoom_join_url)
+                : $settings->zoom_join_url,
+            'start_url' => $isDaily
+                ? ($share['app_host_room_url'] ?? $this->webinarDaily->appHostRoomUrl())
+                : $this->resolvePathwaysStartUrl($settings),
             'zoom_meeting_id' => $settings->zoom_meeting_id,
             'zoom_scheduled_at' => $settings->zoom_scheduled_at?->toIso8601String(),
             'session_started_at' => $settings->session_started_at?->toIso8601String(),
             'zoom_api_configured' => $this->zoom->isConfigured(),
-            'session_active' => !empty($settings->zoom_meeting_id) && !empty($settings->zoom_start_url),
+            'daily_configured' => $this->webinarDaily->shouldUseDaily() || $this->webinarDaily->isDailyWebinar($settings),
+            'meeting_provider' => $isDaily ? 'daily' : 'zoom',
+            'session_active' => !empty($settings->zoom_meeting_id) && (
+                $isDaily || !empty($settings->zoom_start_url)
+            ),
         ], $share));
     }
 
@@ -892,6 +905,7 @@ class MeetingRegistrationController extends Controller
     private function webinarSharePayload(WebinarSetting $settings): array
     {
         $meetingId = trim((string) ($settings->zoom_meeting_id ?? ''));
+        $isDaily = $meetingId !== '' && $this->webinarDaily->isDailyWebinar($settings);
         $base = \App\Support\FrontendUrl::base();
         $registrationUrl = $base . '/meeting-registration';
         $hostPath = '/meeting/room?webinar_host=1&role=1';
@@ -902,7 +916,7 @@ class MeetingRegistrationController extends Controller
         $participantUrl = $participantPath ? $base . $participantPath : null;
 
         $password = '';
-        if (Schema::hasColumn('webinar_settings', 'zoom_password')) {
+        if (!$isDaily && Schema::hasColumn('webinar_settings', 'zoom_password')) {
             $password = trim((string) ($settings->zoom_password ?? ''));
         }
 
@@ -911,13 +925,10 @@ class MeetingRegistrationController extends Controller
             $lines[] = 'Scheduled: ' . $settings->zoom_scheduled_at->format('l, F j, Y g:i A T');
         }
         if ($meetingId !== '') {
-            $lines[] = 'Meeting ID: ' . $meetingId;
+            $lines[] = ($isDaily ? 'Room: ' : 'Meeting ID: ') . $meetingId;
         }
         if ($password !== '') {
             $lines[] = 'Passcode: ' . $password;
-        }
-        if (!empty($settings->zoom_join_url)) {
-            $lines[] = 'Zoom join link: ' . $settings->zoom_join_url;
         }
         $lines[] = 'Registration page: ' . $registrationUrl;
         if ($participantUrl) {
@@ -934,6 +945,7 @@ class MeetingRegistrationController extends Controller
             'app_participant_join_url' => $participantUrl,
             'app_host_room_path' => $hostPath,
             'app_participant_join_path' => $participantPath,
+            'meeting_provider' => $isDaily ? 'daily' : 'zoom',
         ];
     }
 
@@ -950,6 +962,34 @@ class MeetingRegistrationController extends Controller
         }
 
         $settings = WebinarSetting::current();
+
+        if ($this->webinarDaily->shouldUseDaily()) {
+            $institutionId = $settings->platform_institution_id
+                ? (int) $settings->platform_institution_id
+                : null;
+            $ensured = $this->webinarDaily->ensureRoom($settings, $institutionId);
+            if (!$ensured['ok']) {
+                return response()->json([
+                    'message' => $ensured['message'] ?? 'Could not prepare the Daily webinar room.',
+                ], 502);
+            }
+            $settings = $ensured['settings'];
+            $settings->session_started_at = now();
+            $settings->save();
+
+            $share = $this->webinarSharePayload($settings);
+
+            return response()->json([
+                'message' => 'Opening Daily host session. Share the in-app join link with approved participants.',
+                'approved_participants' => $approvedCount,
+                'start_url' => $share['app_host_room_url'],
+                'join_url' => $share['app_participant_join_url'],
+                'recording_enabled' => (bool) $settings->recording_enabled,
+                'zoom_meeting_id' => $settings->zoom_meeting_id,
+                'meeting_provider' => 'daily',
+                'provider' => 'daily',
+            ]);
+        }
 
         if (empty($settings->zoom_start_url) || empty($settings->zoom_meeting_id)) {
             $latest = MeetingRegistration::query()
@@ -1001,6 +1041,8 @@ class MeetingRegistrationController extends Controller
             'join_url' => $settings->zoom_join_url,
             'recording_enabled' => (bool) $settings->recording_enabled,
             'zoom_meeting_id' => $settings->zoom_meeting_id,
+            'meeting_provider' => 'zoom',
+            'provider' => 'zoom',
         ]);
     }
 

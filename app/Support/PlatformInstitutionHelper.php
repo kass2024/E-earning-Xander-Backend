@@ -5,9 +5,34 @@ namespace App\Support;
 use App\Models\PlatformInstitution;
 use App\Models\Student;
 use App\Models\User;
+use App\Support\PlatformUserService;
+use Illuminate\Http\Request;
 
 class PlatformInstitutionHelper
 {
+    public static function resolveActorFromRequest(Request $request): ?User
+    {
+        if ($user = $request->user()) {
+            return $user;
+        }
+
+        $email = PlatformTenantScope::resolveActorEmail($request);
+        if ($email === '') {
+            return null;
+        }
+
+        $normalized = PlatformUserService::normalizeEmail($email);
+
+        return User::query()
+            ->where(function ($query) use ($email, $normalized) {
+                $query->whereRaw('LOWER(TRIM(email)) = ?', [$email]);
+                if ($normalized !== $email) {
+                    $query->orWhereRaw('LOWER(TRIM(email)) = ?', [$normalized]);
+                }
+            })
+            ->first();
+    }
+
     /**
      * Main platform operator (admin/staff with no institution link).
      * Institution-linked admin/staff use tenant branding in header and Zoom.
@@ -24,7 +49,22 @@ class PlatformInstitutionHelper
             return false;
         }
 
+        $configuredAdminEmail = PlatformUserService::adminEmail();
+        $userEmail = strtolower(trim((string) ($user->email ?? '')));
+        if ($configuredAdminEmail !== '' && $userEmail === $configuredAdminEmail) {
+            return true;
+        }
+
+        if (self::isPartnerCompanyAdmin($user)) {
+            return false;
+        }
+
         return empty($user->platform_institution_id);
+    }
+
+    public static function canManageMainPlatformMeetingSettings(?User $user): bool
+    {
+        return self::isMainPlatformAdmin($user);
     }
 
     public static function isPartnerCompanyAdmin(?User $user): bool

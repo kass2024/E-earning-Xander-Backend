@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\AvailableSchedule;
 use App\Models\MeetingRegistration;
 use App\Models\WebinarSetting;
+use App\Services\Meetings\WebinarDailyService;
 use App\Support\MeetingRegistrationJoinUrl;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
@@ -15,6 +16,7 @@ class MeetingRegistrationFulfillmentService
     public function __construct(
         protected ZoomService $zoom,
         protected MeetingRegistrationNotificationService $notifications,
+        protected WebinarDailyService $webinarDaily,
     ) {
     }
 
@@ -117,6 +119,50 @@ class MeetingRegistrationFulfillmentService
             : ($schedule ? $this->getNextStartFromSchedule($schedule) : $this->getNextWebinarStartTime());
 
         $settings = WebinarSetting::current();
+
+        if ($this->webinarDaily->shouldUseDaily()) {
+            $institutionId = !empty($schedule?->platform_institution_id)
+                ? (int) $schedule->platform_institution_id
+                : ($settings->platform_institution_id ? (int) $settings->platform_institution_id : null);
+            $ensured = $this->webinarDaily->ensureRoom($settings, $institutionId);
+            if (!$ensured['ok'] && $requireZoom) {
+                return [
+                    'ok' => false,
+                    'message' => $ensured['message'] ?? 'Could not prepare Daily join link.',
+                ];
+            }
+            $settings = $ensured['settings'] ?? $settings->fresh();
+            $settings->zoom_scheduled_at = $startAt;
+            $settings->save();
+
+            $effectiveMeetingId = trim((string) ($settings->zoom_meeting_id ?? ''));
+            $sdkJoinUrl = $effectiveMeetingId !== ''
+                ? $this->webinarDaily->appParticipantJoinUrl($effectiveMeetingId)
+                : null;
+
+            if (Schema::hasColumn('meeting_registrations', 'zoom_meeting_id')) {
+                $registration->zoom_meeting_id = $effectiveMeetingId ?: null;
+            }
+            if (Schema::hasColumn('meeting_registrations', 'zoom_join_url')) {
+                $registration->zoom_join_url = $sdkJoinUrl;
+            }
+            if (Schema::hasColumn('meeting_registrations', 'zoom_start_time')) {
+                $registration->zoom_start_time = $startAt->toDateTimeString();
+            }
+            $registration->save();
+
+            if ($sdkJoinUrl) {
+                $this->syncApprovedRegistrationZoomLinks($sdkJoinUrl, $effectiveMeetingId);
+            }
+
+            return [
+                'ok' => (bool) $sdkJoinUrl,
+                'join_url' => $sdkJoinUrl,
+                'meeting_id' => $effectiveMeetingId ?: null,
+                'message' => $ensured['message'] ?? null,
+            ];
+        }
+
         $zoom = $this->ensureScheduledWebinarMeeting($settings, $startAt, $schedule);
 
         $effectiveJoinUrl = $zoom['ok'] ? ($zoom['join_url'] ?? null) : ($settings->zoom_join_url ?: null);

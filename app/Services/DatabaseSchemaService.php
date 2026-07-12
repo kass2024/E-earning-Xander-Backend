@@ -20,10 +20,15 @@ use App\Support\PlatformUserService;
 
 
 class DatabaseSchemaService
-
 {
-
     private const MAX_MIGRATE_ATTEMPTS = 5;
+
+    /** Process-level cache — schema checks must not run on every HTTP request. */
+    private static ?bool $schemaReadyCache = null;
+
+    private static float $schemaReadyCachedAt = 0.0;
+
+    private const SCHEMA_READY_TTL_SECONDS = 300;
 
 
 
@@ -230,31 +235,57 @@ class DatabaseSchemaService
 
 
     public function schemaReady(): bool
-
     {
+        $now = microtime(true);
+        if (
+            self::$schemaReadyCache === true
+            && ($now - self::$schemaReadyCachedAt) < self::SCHEMA_READY_TTL_SECONDS
+        ) {
+            return true;
+        }
+
+        try {
+            $cached = \Illuminate\Support\Facades\Cache::get('database_schema_ready_v1');
+            if ($cached === true) {
+                self::$schemaReadyCache = true;
+                self::$schemaReadyCachedAt = $now;
+
+                return true;
+            }
+        } catch (\Throwable) {
+            // Cache may be unavailable during early boot — fall through.
+        }
 
         if (count($this->pendingMigrations()) > 0) {
+            self::$schemaReadyCache = false;
+            self::$schemaReadyCachedAt = $now;
 
             return false;
-
         }
-
-
 
         foreach ($this->verifySchema() as $entry) {
-
             if (!$entry['exists'] || count($entry['missing_columns']) > 0) {
+                self::$schemaReadyCache = false;
+                self::$schemaReadyCachedAt = $now;
 
                 return false;
-
             }
-
         }
 
+        self::$schemaReadyCache = true;
+        self::$schemaReadyCachedAt = $now;
 
+        try {
+            \Illuminate\Support\Facades\Cache::put(
+                'database_schema_ready_v1',
+                true,
+                self::SCHEMA_READY_TTL_SECONDS
+            );
+        } catch (\Throwable) {
+            // ignore
+        }
 
         return true;
-
     }
 
 
@@ -309,13 +340,20 @@ class DatabaseSchemaService
 
 
 
+    private static ?bool $demoEnsured = null;
+
     /** Seed demo instructors/courses/students when the hub has no instructors yet. */
 
     public function ensureDemoData(): array
 
     {
 
+        if (self::$demoEnsured === true) {
+            return ['success' => true, 'skipped' => 'already_ensured_this_process'];
+        }
+
         if (!config('app.auto_seed_demo', true)) {
+            self::$demoEnsured = true;
 
             return ['success' => true, 'skipped' => 'auto_seed_disabled'];
 
@@ -361,7 +399,7 @@ class DatabaseSchemaService
 
         if ($instructorCount > 0) {
 
-            $this->ensureInstitutionSamples();
+            self::$demoEnsured = true;
 
             return ['success' => true, 'skipped' => 'already_has_instructors'];
 
@@ -380,6 +418,8 @@ class DatabaseSchemaService
             ]);
 
 
+
+            self::$demoEnsured = true;
 
             return [
 

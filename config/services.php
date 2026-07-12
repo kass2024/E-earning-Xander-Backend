@@ -52,6 +52,8 @@ return [
         'sdk_secret' => env('ZOOM_EMBED_CLIENT_SECRET', env('ZOOM_SDK_SECRET', '')),
     ],
 
+    'daily' => require __DIR__ . '/daily.php',
+
     'pathways_webinar' => [
         'timezone' => env('PATHWAYS_TIMEZONE', 'Africa/Kigali'),
         'zoom_join_url' => env('PATHWAYS_ZOOM_JOIN_URL', 'https://us06web.zoom.us/j/84024505834?pwd=S35BVbbF5OO8zY1zBMIw59YKw3L5Gx.1'),

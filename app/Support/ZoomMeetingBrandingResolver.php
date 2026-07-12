@@ -89,20 +89,28 @@ class ZoomMeetingBrandingResolver
 
         if ($isMainPlatformHost) {
             unset($branding['use_institution_logo'], $branding['institution']);
+            // Main platform hosts always appear as Xander Learning Hub (not personal Zoom name).
+            $branding['host']['name'] = $this->platformCompanyName();
             $branding['host']['avatar_url'] = $zoomHostContext['avatar_url'] ?? null;
-            $branding['host']['name'] = $zoomHostContext['name'] ?? $branding['host']['name'];
-            $branding['company']['name'] = $this->platformCompanyNameForResponse();
+            $branding['company']['name'] = $this->platformCompanyName();
             $branding['is_main_platform_host'] = true;
+            $branding['use_hub_branding'] = true;
         } elseif ($useInstitutionBranding) {
             $institutionName = trim((string) ($branding['institution']['name'] ?? ''));
             if ($institutionName !== '') {
                 $branding['company']['name'] = $institutionName;
+                // Host tile / Daily userName = institution name when camera is off.
+                $branding['host']['name'] = $institutionName;
+            }
+            if (!empty($branding['institution']['logo_url'])) {
+                $branding['host']['avatar_url'] = $branding['institution']['logo_url'];
             }
         } elseif ($isConfiguredZoomHost || !$useInstitutionBranding) {
             unset($branding['use_institution_logo']);
             $branding['host']['avatar_url'] = $zoomHostContext['avatar_url'] ?? null;
-            $branding['host']['name'] = $zoomHostContext['name'] ?? $branding['host']['name'];
+            $branding['host']['name'] = $this->platformCompanyName();
             $branding['company']['name'] = $this->platformCompanyNameForResponse();
+            $branding['use_hub_branding'] = true;
         }
 
         if (empty($branding['host']['email'] ?? null) && !empty($zoomHostContext['email'])) {
@@ -208,11 +216,19 @@ class ZoomMeetingBrandingResolver
 
     private function platformCompanyName(): string
     {
-        $name = (string) config('app.name', 'parrotglobalstudyacademy Learning');
-        $name = (string) preg_replace('/xander\s*(global\s*)?scholars?/i', 'parrotglobalstudyacademy', $name);
-        $name = (string) preg_replace('/xander\s*learning\s*hub/i', 'parrotglobalstudyacademy Learning', $name);
+        // Always present the main platform as Xander Learning Hub in meetings/UI.
+        $hub = 'Xander Learning Hub';
+        $name = trim((string) config('app.hub_name', $hub));
+        if ($name === '') {
+            $name = $hub;
+        }
 
-        return trim($name) !== '' ? trim($name) : 'parrotglobalstudyacademy Learning';
+        // Strip legacy Parrot labels if APP_NAME still carries them.
+        $name = (string) preg_replace('/parrot\s*global\s*study\s*academy/i', $hub, $name);
+        $name = (string) preg_replace('/parrotglobalstudyacademy/i', $hub, $name);
+        $name = trim($name);
+
+        return $name !== '' ? $name : $hub;
     }
 
     private function isConfiguredZoomHostActor(array $zoomHostContext, ?string $actorEmail): bool

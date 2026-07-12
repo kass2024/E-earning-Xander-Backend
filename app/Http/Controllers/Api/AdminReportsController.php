@@ -70,20 +70,64 @@ class AdminReportsController extends Controller
             ];
         })->values();
 
-        $instructorPerformance = User::query()
+        $instructors = User::query()
             ->where('role', 'instructor')
             ->when($tenantId !== null, fn ($q) => $q->where('platform_institution_id', $tenantId))
+            ->with(['assignedCourses:id'])
             ->withCount('assignedCourses')
             ->orderByDesc('id')
-            ->get()
-            ->map(function (User $instructor) use ($sharePercent, $platformSharePercent) {
-                $courseIds = $instructor->assignedCourses()->pluck('courses.id');
-                $students = $courseIds->isEmpty()
-                    ? 0
-                    : CourseEnrollment::whereIn('course_id', $courseIds)->distinct('student_id')->count('student_id');
-                $enrollments = $courseIds->isEmpty()
-                    ? 0
-                    : CourseEnrollment::whereIn('course_id', $courseIds)->count();
+            ->get();
+
+        $instructorIds = $instructors->pluck('id')->all();
+        $allCourseIds = $instructors
+            ->flatMap(fn (User $instructor) => $instructor->assignedCourses->pluck('id'))
+            ->unique()
+            ->values()
+            ->all();
+
+        $enrollmentByCourse = $allCourseIds === []
+            ? collect()
+            : CourseEnrollment::query()
+                ->selectRaw('course_id, COUNT(*) as enrollments')
+                ->whereIn('course_id', $allCourseIds)
+                ->groupBy('course_id')
+                ->get()
+                ->keyBy('course_id');
+
+        $studentsByCourse = $allCourseIds === []
+            ? collect()
+            : CourseEnrollment::query()
+                ->whereIn('course_id', $allCourseIds)
+                ->get(['course_id', 'student_id'])
+                ->groupBy('course_id')
+                ->map(fn ($rows) => $rows->pluck('student_id')->all());
+
+        $payoutsByInstructor = $instructorIds === []
+            ? collect()
+            : InstructorPayoutRequest::query()
+                ->selectRaw("instructor_id,
+                    SUM(CASE WHEN status IN ('approved','paid','completed') THEN amount ELSE 0 END) as paid_out,
+                    SUM(CASE WHEN status IN ('pending','processing') THEN amount ELSE 0 END) as pending_payout")
+                ->whereIn('instructor_id', $instructorIds)
+                ->groupBy('instructor_id')
+                ->get()
+                ->keyBy('instructor_id');
+
+        $instructorPerformance = $instructors
+            ->map(function (User $instructor) use ($sharePercent, $platformSharePercent, $enrollmentByCourse, $studentsByCourse, $payoutsByInstructor) {
+                $courseIds = $instructor->assignedCourses->pluck('id');
+                $enrollments = 0;
+                $studentIds = [];
+                foreach ($courseIds as $courseId) {
+                    $row = $enrollmentByCourse->get($courseId);
+                    if ($row) {
+                        $enrollments += (int) $row->enrollments;
+                    }
+                    foreach ($studentsByCourse->get($courseId, []) as $studentId) {
+                        $studentIds[$studentId] = true;
+                    }
+                }
+                $students = count($studentIds);
 
                 $totalRevenue = $courseIds->isEmpty()
                     ? 0.0
@@ -91,14 +135,9 @@ class AdminReportsController extends Controller
                 $instructorEarnings = round($totalRevenue * ($sharePercent / 100), 2);
                 $platformEarnings = round($totalRevenue * ($platformSharePercent / 100), 2);
 
-                $paidOut = (float) InstructorPayoutRequest::query()
-                    ->where('instructor_id', $instructor->id)
-                    ->whereIn('status', ['approved', 'paid', 'completed'])
-                    ->sum('amount');
-                $pendingPayout = (float) InstructorPayoutRequest::query()
-                    ->where('instructor_id', $instructor->id)
-                    ->whereIn('status', ['pending', 'processing'])
-                    ->sum('amount');
+                $payoutRow = $payoutsByInstructor->get($instructor->id);
+                $paidOut = (float) ($payoutRow->paid_out ?? 0);
+                $pendingPayout = (float) ($payoutRow->pending_payout ?? 0);
 
                 return [
                     'id' => $instructor->id,

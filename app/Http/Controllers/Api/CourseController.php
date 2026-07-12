@@ -20,6 +20,12 @@ use App\Mail\CourseClassScheduledMail;
 use App\Mail\StaffClassScheduledMail;
 use App\Services\MailDeliveryService;
 use App\Services\ZoomService;
+use App\Services\Meetings\MeetingProviderManager;
+use App\Data\Meetings\MeetingCreateRequest;
+use App\Enums\MeetingProvider;
+use App\Models\PlatformInstitution;
+use App\Exceptions\Meetings\MeetingCreationException;
+use App\Exceptions\Meetings\ProviderNotConfiguredException;
 use App\Support\CourseDetailsHelper;
 use App\Support\CourseMaterialHelper;
 use App\Support\EnrollmentStatusHelper;
@@ -37,10 +43,13 @@ class CourseController extends Controller
 
     protected MailDeliveryService $mail;
 
-    public function __construct(ZoomService $zoom, MailDeliveryService $mail)
+    protected MeetingProviderManager $meetingProviders;
+
+    public function __construct(ZoomService $zoom, MailDeliveryService $mail, MeetingProviderManager $meetingProviders)
     {
         $this->zoom = $zoom;
         $this->mail = $mail;
+        $this->meetingProviders = $meetingProviders;
     }
     public function index(Request $request)
     {
@@ -446,61 +455,49 @@ class CourseController extends Controller
         $hostId = null;
         $actorUserId = $instructor?->id ? (int) $instructor->id : null;
         $actorEmail = $instructor?->email ?? ($data['instructor_email'] ?? null);
+        $meetingProviderValue = MeetingProvider::Daily->value;
+        $dailyRoomMeta = [];
 
         if (!$zoomJoinLink) {
-            $hostId = $this->zoom->resolveHostUserId($institutionId, $actorUserId, $actorEmail);
+            $institution = $institutionId ? PlatformInstitution::query()->find($institutionId) : null;
+            $provider = $this->meetingProviders->forInstitution($institution);
+            $meetingProviderValue = $provider->provider()->value;
             $topic = trim((string) ($data['topic'] ?? '')) ?: ($course->title ?? 'Course Class');
 
-            $zoomPayload = [
-                'topic' => $topic,
-                'start_time' => $scheduledAt->format('Y-m-d\TH:i:s'),
-                'duration' => $data['duration'] ?? 60,
-                'timezone' => $timezone,
-                'agenda' => $data['notes'] ?? '',
-                'join_before_host' => (bool) ($data['join_before_host'] ?? false),
-                'waiting_room' => !((bool) ($data['join_before_host'] ?? false)),
-                'mute_upon_entry' => (bool) ($data['mute_upon_entry'] ?? true),
-                'auto_recording' => (bool) ($data['auto_recording'] ?? false),
-            ];
-
-            $zoomStatus = $this->zoom->configurationStatus();
-            if (!$zoomStatus['api_ready']) {
-                return response()->json([
-                    'message' => $zoomStatus['message'] ?? 'Zoom API is not configured. Add ZOOM_ACCOUNT_ID, ZOOM_CLIENT_ID, and ZOOM_CLIENT_SECRET to .env.',
-                ], 503);
+            try {
+                $result = $provider->createMeeting(new MeetingCreateRequest(
+                    topic: $topic,
+                    startAt: $scheduledAt,
+                    durationMinutes: (int) ($data['duration'] ?? 60),
+                    timezone: $timezone,
+                    platformInstitutionId: $institutionId,
+                    actorUserId: $actorUserId,
+                    actorEmail: $actorEmail,
+                    agenda: $data['notes'] ?? '',
+                    joinBeforeHost: (bool) ($data['join_before_host'] ?? false),
+                    waitingRoom: !((bool) ($data['join_before_host'] ?? false)),
+                    muteUponEntry: (bool) ($data['mute_upon_entry'] ?? true),
+                    autoRecording: (bool) ($data['auto_recording'] ?? false),
+                    courseId: (int) $course->id,
+                ));
+            } catch (ProviderNotConfiguredException $e) {
+                return response()->json(['message' => $e->getMessage()], 503);
+            } catch (MeetingCreationException $e) {
+                return response()->json(['message' => $e->getMessage()], 422);
             }
 
-            $zoomData = $this->zoom->createMeeting($zoomPayload, $hostId);
-
-            if ($zoomData === null) {
-                $oauth = $this->zoom->oauthConnectionStatus();
-
-                return response()->json([
-                    'message' => $oauth['message'] ?? 'Zoom OAuth token unavailable. Verify credentials in .env and run php artisan config:clear on the server.',
-                ], 503);
-            }
-
-            if (isset($zoomData['error']) && !empty($zoomData['error'])) {
-                $body = $zoomData['body'] ?? [];
-                $message = $this->zoom->formatZoomApiErrorMessage($body);
-
-                return response()->json([
-                    'message' => $message,
-                    'zoom' => $body,
-                ], 422);
-            }
-
-            $recordingFallback = !empty($zoomData['recording_fallback']);
-            $zoomJoinLink = $zoomData['join_url'] ?? null;
-            $zoomStartUrl = $zoomData['start_url'] ?? null;
-            $zoomMeetingId = $zoomData['id'] ?? null;
-            $zoomPassword = $zoomData['password'] ?? null;
-            $joinPwd = $this->zoom->extractPasswordFromJoinUrl($zoomJoinLink);
+            $recordingFallback = $result->recordingFallback;
+            $zoomJoinLink = $result->meetingUrl;
+            $zoomStartUrl = $result->hostUrl;
+            $zoomMeetingId = $result->externalMeetingId;
+            $zoomPassword = $result->password;
+            $joinPwd = $result->metadata['join_pwd'] ?? $this->zoom->extractPasswordFromJoinUrl($zoomJoinLink);
+            $hostId = $result->metadata['zoom_host_user_id'] ?? null;
+            $dailyRoomMeta = $result->metadata;
 
             if (!$zoomJoinLink) {
                 return response()->json([
-                    'message' => 'Zoom meeting created but join link was not returned.',
-                    'zoom' => $zoomData,
+                    'message' => 'Meeting was created but join link was not returned.',
                 ], 500);
             }
         }
@@ -528,16 +525,20 @@ class CourseController extends Controller
                     'course_id' => $course->id,
                     'title' => $materialTitle,
                     'description' => $data['notes'] ?? null,
-                    'type' => 'zoom',
+                    'type' => $meetingProviderValue === MeetingProvider::Daily->value ? 'daily' : 'zoom',
                     'resource_url' => $zoomJoinLink,
                     'scheduled_at' => $scheduledAt,
-                    'metadata' => [
+                    'metadata' => array_filter([
+                        'meeting_provider' => $meetingProviderValue,
                         'join_url' => $zoomJoinLink,
                         'start_url' => $zoomStartUrl,
                         'meeting_id' => $zoomMeetingId,
                         'password' => $zoomPassword,
                         'join_pwd' => $joinPwd,
                         'zoom_host_user_id' => $hostId ?? null,
+                        'host_user_id' => $actorUserId,
+                        'daily_room_name' => $dailyRoomMeta['daily_room_name'] ?? null,
+                        'daily_room_url' => $dailyRoomMeta['daily_room_url'] ?? null,
                         'platform_institution_id' => $institutionId,
                         'duration' => $data['duration'] ?? 60,
                         'timezone' => $timezone,
@@ -546,7 +547,7 @@ class CourseController extends Controller
                         'join_before_host' => (bool) ($data['join_before_host'] ?? false),
                         'waiting_room' => !((bool) ($data['join_before_host'] ?? false)),
                         'mute_upon_entry' => (bool) ($data['mute_upon_entry'] ?? true),
-                    ],
+                    ], static fn ($v) => $v !== null),
                     'sort_order' => 0,
                 ]);
             } catch (\Throwable $e) {

@@ -736,12 +736,50 @@ class InstructorDashboardController extends Controller
             return response()->json(['message' => 'Instructor not found'], 404);
         }
 
-        if (strtolower((string) $material->type) !== 'zoom') {
+        $type = strtolower((string) $material->type);
+        $isLiveSession = in_array($type, ['zoom', 'daily'], true) || CourseMaterialHelper::isDailyMeeting($material);
+        if (!$isLiveSession) {
             return response()->json(['message' => 'This material is not a live class session.'], 422);
         }
 
         if (!$this->canHostMaterial($instructor, $material)) {
             return response()->json(['message' => 'You are not assigned to this course.'], 403);
+        }
+
+        if (CourseMaterialHelper::isDailyMeeting($material)) {
+            $roomName = trim((string) (CourseMaterialHelper::meetingId($material) ?? ''));
+            if ($roomName === '') {
+                return response()->json(['message' => 'No active Daily room for this live class.'], 422);
+            }
+
+            /** @var \App\Services\Meetings\DailyMeetingProvider $dailyProvider */
+            $dailyProvider = app(\App\Services\Meetings\DailyMeetingProvider::class);
+            $result = $dailyProvider->toggleCloudRecording($roomName, $data['action']);
+            if (empty($result['ok'])) {
+                return response()->json([
+                    'message' => $result['message']
+                        ?? 'Daily recording failed. Enable cloud recording on your Daily plan.',
+                    'details' => $result['result'] ?? null,
+                ], 422);
+            }
+
+            $meta = is_array($material->metadata) ? $material->metadata : [];
+            if ($data['action'] === 'start' || $data['action'] === 'resume') {
+                $meta['recording_enabled'] = true;
+                $meta['recording_active'] = true;
+            } elseif ($data['action'] === 'stop' || $data['action'] === 'pause') {
+                $meta['recording_active'] = false;
+            }
+            $material->metadata = $meta;
+            $material->save();
+
+            return response()->json([
+                'message' => 'Daily recording ' . $data['action'] . ' request sent.',
+                'provider' => 'daily',
+                'recording_enabled' => (bool) ($meta['recording_enabled'] ?? false),
+                'recording_active' => (bool) ($meta['recording_active'] ?? false),
+                'result' => $result['result'] ?? $result,
+            ]);
         }
 
         $meetingId = trim((string) (CourseMaterialHelper::meetingId($material) ?? ''));
@@ -777,6 +815,7 @@ class InstructorDashboardController extends Controller
 
         return response()->json([
             'message' => 'Recording ' . $data['action'] . ' request sent.',
+            'provider' => 'zoom',
             'recording_enabled' => (bool) ($meta['recording_enabled'] ?? false),
             'recording_active' => (bool) ($meta['recording_active'] ?? false),
             'result' => $result,

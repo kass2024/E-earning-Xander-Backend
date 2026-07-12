@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\MeetingProvider;
 use App\Models\LiveZoomCohort;
 use App\Models\LiveZoomCohortQueueEntry;
 use App\Support\LiveZoomCohortHelper;
@@ -672,6 +673,26 @@ class LiveZoomCohortQueueService
     }
 
     /**
+     * Daily rooms do not need the Zoom-style "host already in SDK" gate —
+     * admitted guests can enter as soon as the session is live.
+     */
+    protected function cohortUsesDaily(LiveZoomCohort $cohort): bool
+    {
+        if (Schema::hasColumn('livezoom_cohort', 'meeting_provider')) {
+            $stored = MeetingProvider::tryFromString($cohort->meeting_provider ?? null);
+            if ($stored === MeetingProvider::Daily) {
+                return true;
+            }
+            if ($stored === MeetingProvider::Zoom) {
+                return false;
+            }
+        }
+
+        return trim((string) ($cohort->daily_room_name ?? '')) !== ''
+            || str_contains(strtolower((string) ($cohort->zoom_link ?? '')), 'daily.co');
+    }
+
+    /**
      * @return array<string, mixed>
      */
     protected function entryPayload(LiveZoomCohort $cohort, LiveZoomCohortQueueEntry $entry): array
@@ -679,9 +700,11 @@ class LiveZoomCohortQueueService
         $ahead = max(0, (int) $entry->queue_position - 1);
         $sessionLive = ($cohort->session_status ?? 'idle') === 'live';
         $hostInMeeting = $this->resolveHostInMeeting($cohort);
+        $usesDaily = $this->cohortUsesDaily($cohort);
+        // Daily: admitted + live is enough (avoid multi-second wait for host-in-meeting flag).
         $canJoin = in_array($entry->status, ['admitted', 'in_meeting'], true)
             && $sessionLive
-            && $hostInMeeting;
+            && ($usesDaily || $hostInMeeting);
 
         return [
             'id' => $entry->id,
@@ -719,7 +742,7 @@ class LiveZoomCohortQueueService
                     : 'You are #' . $entry->queue_position . ' in the queue. Waiting for the previous participant to finish.'),
             'admitted' => !$sessionLive
                 ? 'The host admitted you. The session will open shortly — stay on this page.'
-                : (!$hostInMeeting
+                : (!$hostInMeeting && !($cohort && $this->cohortUsesDaily($cohort))
                     ? 'You are admitted. Waiting for the host to connect — stay on this page.'
                     : 'It is your turn. Open the in-app meeting to enter the session.'),
             'in_meeting' => 'You are in the session.',

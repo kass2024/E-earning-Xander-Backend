@@ -5,7 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Services\MailDeliveryService;
 use App\Services\ZoomHostAssignmentService;
-use App\Services\ZoomHostResolver;
+use App\Services\Meetings\MeetingProviderStatusService;
 use App\Services\ZoomService;
 use App\Support\AdminRecordingCatalog;
 use App\Support\AdminZoomMeetingRegistry;
@@ -85,6 +85,11 @@ class ZoomController extends Controller
             : null;
 
         return response()->json($assignment->getHostInventory($institutionId));
+    }
+
+    public function meetingProviderStatus(MeetingProviderStatusService $status)
+    {
+        return response()->json($status->summary());
     }
 
     public function listRecordings(Request $request)

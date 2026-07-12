@@ -19,6 +19,7 @@ class PlatformInstitution extends Model
         'portal_tagline', 'portal_hero_title', 'portal_hero_subtitle', 'portal_about',
         'portal_primary_color', 'portal_features', 'portal_hero_image_path', 'portal_cta_label',
         'zoom_host_user_id',
+        'meeting_provider',
     ];
 
     protected $hidden = [
@@ -150,6 +151,8 @@ class PlatformInstitution extends Model
             'mail_from_name' => $this->mail_from_name,
             'portal' => $this->portalContentPayload(),
             'zoom_host_user_id' => $this->zoom_host_user_id,
+            'meeting_provider' => $this->meeting_provider
+                ?? app(\App\Services\PlatformSettingsService::class)->mainPlatformMeetingProvider()->value,
         ];
     }
 

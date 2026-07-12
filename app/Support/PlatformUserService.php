@@ -113,6 +113,7 @@ class PlatformUserService
                 'password' => $plain,
                 'role' => 'admin',
                 'status' => 'Active',
+                'platform_institution_id' => null,
             ]);
 
             return $user;
@@ -122,6 +123,7 @@ class PlatformUserService
             'name' => self::adminDisplayName(),
             'role' => 'admin',
             'status' => 'Active',
+            'platform_institution_id' => null,
         ]);
         self::setUserPassword($user, $plain);
 

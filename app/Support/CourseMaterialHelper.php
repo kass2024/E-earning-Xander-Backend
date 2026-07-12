@@ -7,6 +7,8 @@ namespace App\Support;
 
 
 use App\Models\CourseMaterial;
+use App\Models\PlatformInstitution;
+use App\Enums\MeetingProvider;
 use App\Services\ZoomService;
 use App\Support\FrontendUrl;
 use Carbon\Carbon;
@@ -123,6 +125,63 @@ class CourseMaterialHelper
 
         return $meetingId ? (string) $meetingId : null;
 
+    }
+
+    public static function meetingProvider(CourseMaterial $material, ?PlatformInstitution $institution = null): MeetingProvider
+    {
+        $meta = is_array($material->metadata) ? $material->metadata : [];
+        $stored = $meta['meeting_provider'] ?? null;
+        if (is_string($stored) && trim($stored) !== '') {
+            return MeetingProvider::fromStringOrDefault($stored);
+        }
+
+        // Prefer Daily when room metadata clearly points at Daily.
+        if (!empty($meta['daily_room_name']) || !empty($meta['daily_room_url'])) {
+            return MeetingProvider::Daily;
+        }
+        $joinUrl = (string) ($meta['join_url'] ?? $material->resource_url ?? '');
+        if ($joinUrl !== '' && str_contains($joinUrl, '.daily.co/')) {
+            return MeetingProvider::Daily;
+        }
+
+        // Existing Zoom-style meeting without stored provider = legacy Zoom.
+        if (self::hasExistingMeeting($material)) {
+            return MeetingProvider::Zoom;
+        }
+
+        // New meeting: institution or main platform default (Daily).
+        if ($institution) {
+            return MeetingProvider::fromStringOrDefault($institution->meeting_provider);
+        }
+
+        return app(\App\Services\PlatformSettingsService::class)->mainPlatformMeetingProvider();
+    }
+
+    public static function hasExistingMeeting(CourseMaterial $material): bool
+    {
+        $meta = is_array($material->metadata) ? $material->metadata : [];
+
+        return !empty($meta['meeting_id'])
+            || !empty($meta['daily_room_name'])
+            || !empty($meta['join_url']);
+    }
+
+    public static function isDailyMeeting(CourseMaterial $material): bool
+    {
+        return self::meetingProvider($material) === MeetingProvider::Daily;
+    }
+
+    public static function externalMeetingReference(CourseMaterial $material): ?string
+    {
+        $meta = is_array($material->metadata) ? $material->metadata : [];
+
+        if (self::isDailyMeeting($material)) {
+            $dailyRoom = $meta['daily_room_name'] ?? $meta['meeting_id'] ?? null;
+
+            return $dailyRoom ? (string) $dailyRoom : null;
+        }
+
+        return self::meetingId($material);
     }
 
 
@@ -321,7 +380,7 @@ class CourseMaterialHelper
 
         $zoomLive = false;
 
-        if ($meetingId) {
+        if ($meetingId && self::meetingProvider($material) === MeetingProvider::Zoom) {
 
             if ($liveMeetingIds !== null) {
 
@@ -340,6 +399,30 @@ class CourseMaterialHelper
 
         }
 
+        if (self::meetingProvider($material) === MeetingProvider::Daily) {
+            if (!empty($meta['provider_started_at']) || !empty($meta['session_started_at'])) {
+                if ($sessionStartedAt === null) {
+                    try {
+                        $sessionStartedAt = Carbon::parse($meta['session_started_at'] ?? $meta['provider_started_at']);
+                    } catch (\Throwable) {
+                        $sessionStartedAt = null;
+                    }
+                }
+            }
+
+            if (!empty($meta['provider_ended_at'])) {
+                return [
+                    'session_status' => 'ended',
+                    'can_join' => false,
+                    'is_past' => true,
+                    'is_upcoming' => false,
+                    'is_live_now' => false,
+                    'duration_minutes' => $durationMinutes,
+                    'zoom_is_live' => false,
+                ];
+            }
+        }
+
 
 
         $sessionEnd = $sessionStartedAt
@@ -352,11 +435,15 @@ class CourseMaterialHelper
 
         if ($meetingId) {
 
-            // Zoom-backed sessions: join when the host has started (live on Zoom or marked started), not only at scheduled time.
-
-            $canJoin = $zoomLive || ($sessionStartedAt !== null && $now->lte($sessionEnd));
-
-            $isPast = !$canJoin && ($now->gt($scheduledEnd) || ($sessionStartedAt !== null && $now->gt($sessionEnd)));
+            if (self::meetingProvider($material) === MeetingProvider::Daily) {
+                $canJoin = $now->gte($scheduled) && $now->lte($scheduledEnd)
+                    && empty($meta['provider_ended_at']);
+                $isPast = !empty($meta['provider_ended_at']) || $now->gt($scheduledEnd);
+            } else {
+                // Zoom-backed sessions: join when the host has started (live on Zoom or marked started), not only at scheduled time.
+                $canJoin = $zoomLive || ($sessionStartedAt !== null && $now->lte($sessionEnd));
+                $isPast = !$canJoin && ($now->gt($scheduledEnd) || ($sessionStartedAt !== null && $now->gt($sessionEnd)));
+            }
 
         } else {
 
