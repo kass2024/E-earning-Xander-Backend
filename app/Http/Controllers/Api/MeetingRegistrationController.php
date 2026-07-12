@@ -1197,7 +1197,12 @@ class MeetingRegistrationController extends Controller
                 $user = User::create($create);
             } else {
                 $user->name = $data['full_name'];
-                $user->role = 'meeting_user';
+                // Never demote institution owners / platform staff / instructors to meeting_user.
+                $currentRole = strtolower(trim((string) ($user->role ?? '')));
+                $protectedRoles = ['partner_company', 'admin', 'staff', 'instructor'];
+                if (!in_array($currentRole, $protectedRoles, true)) {
+                    $user->role = 'meeting_user';
+                }
 
                 if ($hasPhone && array_key_exists('phone', $data)) {
                     $user->phone = $data['phone'];

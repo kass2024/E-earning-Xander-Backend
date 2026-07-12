@@ -77,6 +77,51 @@ class PlatformInstitutionHelper
             && !empty($user->platform_institution_id);
     }
 
+    /**
+     * Restore partner_company for institution owners who were demoted (e.g. to meeting_user).
+     */
+    public static function restorePartnerOwnerRole(User $user): User
+    {
+        $role = strtolower(trim((string) ($user->role ?? '')));
+        if (in_array($role, ['partner_company', 'admin', 'staff', 'instructor'], true)) {
+            return $user;
+        }
+
+        $email = strtolower(trim((string) ($user->email ?? '')));
+        if ($email === '') {
+            return $user;
+        }
+
+        $owned = PlatformInstitution::query()
+            ->where(function ($q) use ($user, $email) {
+                $q->where('owner_user_id', $user->id)
+                    ->orWhereRaw('LOWER(TRIM(contact_email)) = ?', [$email]);
+            })
+            ->orderByDesc('id')
+            ->first();
+
+        if (!$owned) {
+            return $user;
+        }
+
+        $user->role = 'partner_company';
+        $user->platform_institution_id = (int) $owned->id;
+        if (empty($user->status) || strtolower(trim((string) $user->status)) === 'inactive') {
+            // Keep pending/unpaid statuses that gate payment; otherwise activate.
+            if (!in_array(strtolower(trim((string) ($user->status ?? ''))), ['pending', 'unpaid'], true)) {
+                $user->status = 'Active';
+            }
+        }
+        $user->save();
+
+        if (empty($owned->owner_user_id) || (int) $owned->owner_user_id !== (int) $user->id) {
+            $owned->owner_user_id = $user->id;
+            $owned->save();
+        }
+
+        return $user->fresh() ?? $user;
+    }
+
     public static function hasAdminAccess(?User $user): bool
     {
         if (!$user) {

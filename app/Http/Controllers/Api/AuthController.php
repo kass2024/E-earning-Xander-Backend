@@ -361,6 +361,10 @@ class AuthController extends Controller
             }
 
             $institution = PlatformInstitutionHelper::resolveForUser($user);
+            $user = PlatformInstitutionHelper::restorePartnerOwnerRole($user);
+            $userRole = strtolower(trim((string) ($user->role ?? '')));
+            $institution = PlatformInstitutionHelper::resolveForUser($user) ?? $institution;
+
             if ($userRole === 'partner_company') {
                 if (!$institution) {
                     return response()->json(['message' => 'Partner institution not linked to this account.'], 403);
