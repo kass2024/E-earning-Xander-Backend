@@ -427,15 +427,20 @@ class StudyShiftController extends Controller
 
     private function canManageCourse(User $user, ?int $courseId): bool
     {
-        if ($this->isAdmin($user)) {
+        if (!$courseId) {
+            return false;
+        }
+
+        $course = Course::query()->find($courseId);
+        if (!$course || !PlatformTenantScope::userOwnsCourse($user, $course)) {
+            return false;
+        }
+
+        if ($this->isAdmin($user) || PlatformInstitutionHelper::isPartnerCompanyAdmin($user)) {
             return true;
         }
 
         if (!$this->isInstructor($user)) {
-            return false;
-        }
-
-        if (!$courseId) {
             return false;
         }
 

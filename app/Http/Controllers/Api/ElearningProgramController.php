@@ -17,42 +17,23 @@ class ElearningProgramController extends Controller
         $withCourses = $request->boolean('with_courses');
         $activeOnly = $request->boolean('active_only');
         $tenantId = PlatformTenantScope::resolveTenantId($request);
-        $cacheKey = ($tenantId ? 'inst_' . $tenantId . '_' : '') . ($withCourses ? 'with_courses' : ($activeOnly ? 'active' : 'all'));
+        $cacheKey = 'owned_' . ($tenantId !== null ? 'inst_' . $tenantId : 'hub')
+            . ($withCourses ? '_with_courses' : ($activeOnly ? '_active' : '_all'));
 
-        if ($tenantId !== null) {
+        $programs = ApiListCache::remember('elearning_programs', $cacheKey, 120, function () use ($request, $withCourses, $activeOnly, $tenantId) {
             $query = ElearningProgram::query()
-                ->where('platform_institution_id', $tenantId)
                 ->orderBy('sort_order')
                 ->orderBy('name');
+
+            PlatformTenantScope::applyToQuery($query, $request);
 
             if ($activeOnly) {
                 $query->where('status', 'Active');
             }
 
             if ($withCourses) {
-                $query->with(['courses' => function ($q) use ($activeOnly, $tenantId) {
-                    $q->where('platform_institution_id', $tenantId);
-                    if ($activeOnly) {
-                        $q->where('status', 'Active');
-                    }
-                    $q->orderBy('title');
-                }]);
-            }
-
-            return response()->json($query->get(), 200);
-        }
-
-        $programs = ApiListCache::remember('elearning_programs', $cacheKey, 120, function () use ($withCourses, $activeOnly) {
-            $query = ElearningProgram::query()
-                ->orderBy('sort_order')
-                ->orderBy('name');
-
-            if ($activeOnly) {
-                $query->where('status', 'Active');
-            }
-
-            if ($withCourses) {
-                $query->with(['courses' => function ($q) use ($activeOnly) {
+                $query->with(['courses' => function ($q) use ($request, $activeOnly, $tenantId) {
+                    PlatformTenantScope::applyToQuery($q, $request);
                     if ($activeOnly) {
                         $q->where('status', 'Active');
                     }

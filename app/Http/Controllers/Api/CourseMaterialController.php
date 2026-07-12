@@ -13,6 +13,7 @@ use App\Support\CourseMaterialHelper;
 use App\Support\EnrollmentStatusHelper;
 use App\Support\LearnerRecordingAccess;
 use App\Support\MaterialFileHelper;
+use App\Support\PlatformTenantScope;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 
@@ -33,6 +34,8 @@ class CourseMaterialController extends Controller
 
     public function index(Request $request, Course $course)
     {
+        PlatformTenantScope::assertCanAccess($request, $course);
+
         $includeRecordings = $request->boolean('include_recordings');
 
         return response()->json([
@@ -50,6 +53,17 @@ class CourseMaterialController extends Controller
         $studentId = $request->query('student_id');
         if (!$studentId) {
             return response()->json(['message' => 'student_id is required'], 400);
+        }
+
+        $student = \App\Models\Student::query()->find($studentId);
+        if (!$student) {
+            return response()->json(['message' => 'Student not found'], 404);
+        }
+
+        try {
+            PlatformTenantScope::assertStudentCanAccessCourse($student, $course);
+        } catch (\Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException $e) {
+            return response()->json(['message' => $e->getMessage()], 403);
         }
 
         $enrollment = CourseEnrollment::query()
@@ -170,6 +184,7 @@ class CourseMaterialController extends Controller
 
     public function store(Request $request, Course $course)
     {
+        PlatformTenantScope::assertCanAccess($request, $course);
         $data = $request->validate([
             'title' => 'required|string|max:255',
             'description' => 'nullable|string',
@@ -192,7 +207,8 @@ class CourseMaterialController extends Controller
 
     public function update(Request $request, Course $course, CourseMaterial $material)
     {
-        $this->materialCourse($course, $material);
+        $ownedCourse = $this->materialCourse($course, $material);
+        PlatformTenantScope::assertCanAccess($request, $ownedCourse);
 
         $data = $request->validate([
             'title' => 'sometimes|required|string|max:255',
@@ -211,8 +227,11 @@ class CourseMaterialController extends Controller
         ]);
     }
 
-    public function destroy(Course $course, CourseMaterial $material)
+    public function destroy(Request $request, Course $course, CourseMaterial $material)
     {
+        $ownedCourse = $this->materialCourse($course, $material);
+        PlatformTenantScope::assertCanAccess($request, $ownedCourse);
+
         $meta = is_array($material->metadata) ? $material->metadata : [];
         $fileId = MaterialFileHelper::pcloudFileId($meta);
         if ($fileId && app(PCloudService::class)->isConfigured()) {
@@ -305,6 +324,8 @@ class CourseMaterialController extends Controller
 
     public function uploadPCloud(Request $request, Course $course, PCloudService $pcloud)
     {
+        PlatformTenantScope::assertCanAccess($request, $course);
+
         if (!$pcloud->isConfigured()) {
             return response()->json([
                 'message' => 'pCloud is not configured. Set PCLOUD_ACCESS_TOKEN in the server .env file.',

@@ -19,6 +19,7 @@ use App\Models\Course;
 use App\Models\CourseEnrollment;
 use App\Services\EnrollmentStudyShiftService;
 use App\Services\StudyShiftProvisioningService;
+use App\Support\PlatformTenantScope;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 
@@ -171,6 +172,10 @@ class AuthController extends Controller
         foreach ($enrollments as $item) {
             $course = Course::query()->find((int) $item['course_id']);
             if (!$course) {
+                continue;
+            }
+
+            if (!PlatformTenantScope::studentCanAccessCourse($student, $course)) {
                 continue;
             }
 

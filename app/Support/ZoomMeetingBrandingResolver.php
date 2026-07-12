@@ -26,9 +26,21 @@ class ZoomMeetingBrandingResolver
         ?string $actorEmail = null,
         ?int $platformInstitutionId = null,
         ?LiveZoomCohort $cohort = null,
+        bool $allowActorInstitutionFallback = true,
     ): array {
-        $institution = $this->resolveInstitution($actorEmail, $platformInstitutionId, $cohort);
-        $useInstitutionBranding = $this->shouldUseInstitutionBranding($actorEmail, $institution, $cohort, $platformInstitutionId);
+        $institution = $this->resolveInstitution(
+            $actorEmail,
+            $platformInstitutionId,
+            $cohort,
+            $allowActorInstitutionFallback,
+        );
+        $useInstitutionBranding = $this->shouldUseInstitutionBranding(
+            $actorEmail,
+            $institution,
+            $cohort,
+            $platformInstitutionId,
+            $allowActorInstitutionFallback,
+        );
         $brandingInstitutionId = $institution?->id ?? $platformInstitutionId;
         $actorUser = $this->resolveActorUser($actorEmail);
         $zoomHost = $this->zoomService->resolveConfiguredHostBranding(
@@ -82,7 +94,13 @@ class ZoomMeetingBrandingResolver
         array $zoomHostContext,
         ?User $actorUser,
     ): array {
-        $isMainPlatformHost = $actorUser && PlatformInstitutionHelper::isMainPlatformAdmin($actorUser);
+        $isMainPlatformHost = $actorUser && (
+            PlatformInstitutionHelper::isMainPlatformAdmin($actorUser)
+            || (
+                !$useInstitutionBranding
+                && in_array(strtolower(trim((string) ($actorUser->role ?? ''))), ['admin', 'staff'], true)
+            )
+        );
         $actorEmail = $actorUser?->email;
         $isConfiguredZoomHost = $this->isConfiguredZoomHostActor($zoomHostContext, $actorEmail);
         $useInstitutionBranding = (bool) ($branding['use_institution_logo'] ?? false);
@@ -106,11 +124,13 @@ class ZoomMeetingBrandingResolver
                 $branding['host']['avatar_url'] = $branding['institution']['logo_url'];
             }
         } elseif ($isConfiguredZoomHost || !$useInstitutionBranding) {
-            unset($branding['use_institution_logo']);
+            unset($branding['use_institution_logo'], $branding['institution']);
             $branding['host']['avatar_url'] = $zoomHostContext['avatar_url'] ?? null;
             $branding['host']['name'] = $this->platformCompanyName();
             $branding['company']['name'] = $this->platformCompanyNameForResponse();
             $branding['use_hub_branding'] = true;
+            $branding['is_main_platform_host'] = $actorUser
+                && in_array(strtolower(trim((string) ($actorUser->role ?? ''))), ['admin', 'staff'], true);
         }
 
         if (empty($branding['host']['email'] ?? null) && !empty($zoomHostContext['email'])) {
@@ -142,6 +162,7 @@ class ZoomMeetingBrandingResolver
         ?PlatformInstitution $institution,
         ?LiveZoomCohort $cohort,
         ?int $platformInstitutionId,
+        bool $allowActorInstitutionFallback = true,
     ): bool {
         if (!$institution) {
             return false;
@@ -149,6 +170,11 @@ class ZoomMeetingBrandingResolver
 
         $actorUser = $this->resolveActorUser($actorEmail);
         if ($actorUser && PlatformInstitutionHelper::isMainPlatformAdmin($actorUser)) {
+            return false;
+        }
+
+        // Hub hosting session: no tenant id in the request — never brand as another institution.
+        if (!$allowActorInstitutionFallback && !$platformInstitutionId && !$cohort) {
             return false;
         }
 
@@ -189,6 +215,7 @@ class ZoomMeetingBrandingResolver
         ?string $actorEmail,
         ?int $platformInstitutionId,
         ?LiveZoomCohort $cohort,
+        bool $allowActorInstitutionFallback = true,
     ): ?PlatformInstitution {
         if ($cohort && !empty($cohort->platform_institution_id)) {
             return PlatformInstitution::find($cohort->platform_institution_id);
@@ -196,6 +223,10 @@ class ZoomMeetingBrandingResolver
 
         if ($platformInstitutionId) {
             return PlatformInstitution::find($platformInstitutionId);
+        }
+
+        if (!$allowActorInstitutionFallback) {
+            return null;
         }
 
         if ($actorEmail) {

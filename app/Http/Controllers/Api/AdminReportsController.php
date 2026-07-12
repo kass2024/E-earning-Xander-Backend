@@ -21,13 +21,10 @@ class AdminReportsController extends Controller
     public function analytics(Request $request)
     {
         $tenantId = PlatformTenantScope::resolveTenantId($request);
+        $cacheKey = $tenantId !== null ? 'inst_' . $tenantId : 'hub';
 
-        if ($tenantId !== null) {
-            return response()->json($this->buildAnalyticsPayload($tenantId), 200);
-        }
-
-        $payload = ApiListCache::remember('analytics', 'admin_dashboard', 180, function () {
-            return $this->buildAnalyticsPayload();
+        $payload = ApiListCache::remember('analytics', $cacheKey, 180, function () use ($tenantId) {
+            return $this->buildAnalyticsPayload($tenantId);
         });
 
         return response()->json($payload, 200);
@@ -35,9 +32,8 @@ class AdminReportsController extends Controller
 
     protected function buildAnalyticsPayload(?int $tenantId = null): array
     {
-        $tenantCourseIds = $tenantId !== null
-            ? PlatformTenantScope::tenantCourseIds($tenantId)
-            : null;
+        // null tenantId = main hub courses only (never all institutions).
+        $tenantCourseIds = PlatformTenantScope::tenantCourseIds($tenantId);
         $now = Carbon::now();
         $months = collect(range(5, 0))->map(function ($i) use ($now) {
             return $now->copy()->subMonths($i)->format('Y-m');
@@ -46,7 +42,7 @@ class AdminReportsController extends Controller
         $enrollmentRows = CourseEnrollment::query()
             ->selectRaw("DATE_FORMAT(created_at, '%Y-%m') as month, COUNT(*) as count")
             ->where('created_at', '>=', $now->copy()->subMonths(5)->startOfMonth())
-            ->when($tenantCourseIds !== null, fn ($q) => $q->whereIn('course_id', $tenantCourseIds ?: [-1]))
+            ->whereIn('course_id', $tenantCourseIds ?: [-1])
             ->groupBy('month')
             ->pluck('count', 'month');
 
@@ -72,7 +68,11 @@ class AdminReportsController extends Controller
 
         $instructors = User::query()
             ->where('role', 'instructor')
-            ->when($tenantId !== null, fn ($q) => $q->where('platform_institution_id', $tenantId))
+            ->when(
+                $tenantId !== null,
+                fn ($q) => $q->where('platform_institution_id', $tenantId),
+                fn ($q) => $q->whereNull('platform_institution_id'),
+            )
             ->with(['assignedCourses:id'])
             ->withCount('assignedCourses')
             ->orderByDesc('id')
@@ -158,7 +158,11 @@ class AdminReportsController extends Controller
             ->values();
 
         $coursePerformance = Course::query()
-            ->when($tenantId !== null, fn ($q) => $q->where('platform_institution_id', $tenantId))
+            ->when(
+                $tenantId !== null,
+                fn ($q) => $q->where('platform_institution_id', $tenantId),
+                fn ($q) => $q->whereNull('platform_institution_id'),
+            )
             ->with(['instructors:id,name,email'])
             ->withCount([
                 'enrollments as total_enrollments',
@@ -187,7 +191,11 @@ class AdminReportsController extends Controller
             ->values();
 
         $studentsByCountry = Student::query()
-            ->when($tenantId !== null, fn ($q) => $q->where('platform_institution_id', $tenantId))
+            ->when(
+                $tenantId !== null,
+                fn ($q) => $q->where('platform_institution_id', $tenantId),
+                fn ($q) => $q->whereNull('platform_institution_id'),
+            )
             ->selectRaw("COALESCE(NULLIF(TRIM(country), ''), 'Unknown') as country, COUNT(*) as count")
             ->groupBy('country')
             ->orderByDesc('count')
@@ -206,24 +214,34 @@ class AdminReportsController extends Controller
 
         $pendingInstructors = User::query()
             ->where('role', 'instructor')
-            ->when($tenantId !== null, fn ($q) => $q->where('platform_institution_id', $tenantId))
+            ->when(
+                $tenantId !== null,
+                fn ($q) => $q->where('platform_institution_id', $tenantId),
+                fn ($q) => $q->whereNull('platform_institution_id'),
+            )
             ->whereRaw('LOWER(COALESCE(status, "")) IN (?, ?, ?)', ['pending', 'inactive', ''])
             ->count();
 
         $pendingCourses = Course::query()
-            ->when($tenantId !== null, fn ($q) => $q->where('platform_institution_id', $tenantId))
+            ->when(
+                $tenantId !== null,
+                fn ($q) => $q->where('platform_institution_id', $tenantId),
+                fn ($q) => $q->whereNull('platform_institution_id'),
+            )
             ->whereRaw('LOWER(COALESCE(status, "")) IN (?, ?)', ['pending', 'draft'])
             ->count();
 
         $pendingPayments = CoursePayment::query()
-            ->when($tenantCourseIds !== null, fn ($q) => $q->whereIn('course_id', $tenantCourseIds ?: [-1]))
+            ->whereIn('course_id', $tenantCourseIds ?: [-1])
             ->whereIn('status', ['pending', 'processing'])
             ->count();
 
         $pendingPayoutQuery = InstructorPayoutRequest::query()
-            ->when($tenantId !== null, function ($q) use ($tenantId) {
-                $q->whereHas('instructor', fn ($iq) => $iq->where('platform_institution_id', $tenantId));
-            });
+            ->when(
+                $tenantId !== null,
+                fn ($q) => $q->whereHas('instructor', fn ($iq) => $iq->where('platform_institution_id', $tenantId)),
+                fn ($q) => $q->whereHas('instructor', fn ($iq) => $iq->whereNull('platform_institution_id')),
+            );
 
         $pendingPayoutRequests = (clone $pendingPayoutQuery)
             ->whereIn('status', ['pending', 'processing'])
@@ -242,25 +260,26 @@ class AdminReportsController extends Controller
                 'rejected' => MeetingRegistration::whereRaw('LOWER(COALESCE(status, "")) = ?', ['rejected'])->count(),
             ];
 
-        $studentQuery = Student::query();
-        if ($tenantId !== null) {
-            $studentQuery->where('platform_institution_id', $tenantId);
-        }
+        $studentQuery = Student::query()->when(
+            $tenantId !== null,
+            fn ($q) => $q->where('platform_institution_id', $tenantId),
+            fn ($q) => $q->whereNull('platform_institution_id'),
+        );
 
-        $courseQuery = Course::query();
-        if ($tenantId !== null) {
-            $courseQuery->where('platform_institution_id', $tenantId);
-        }
+        $courseQuery = Course::query()->when(
+            $tenantId !== null,
+            fn ($q) => $q->where('platform_institution_id', $tenantId),
+            fn ($q) => $q->whereNull('platform_institution_id'),
+        );
 
-        $instructorQuery = User::query()->where('role', 'instructor');
-        if ($tenantId !== null) {
-            $instructorQuery->where('platform_institution_id', $tenantId);
-        }
+        $instructorQuery = User::query()->where('role', 'instructor')->when(
+            $tenantId !== null,
+            fn ($q) => $q->where('platform_institution_id', $tenantId),
+            fn ($q) => $q->whereNull('platform_institution_id'),
+        );
 
-        $enrollmentQuery = CourseEnrollment::query();
-        if ($tenantCourseIds !== null) {
-            $enrollmentQuery->whereIn('course_id', $tenantCourseIds ?: [-1]);
-        }
+        $enrollmentQuery = CourseEnrollment::query()
+            ->whereIn('course_id', $tenantCourseIds ?: [-1]);
 
         return [
             'summary' => [

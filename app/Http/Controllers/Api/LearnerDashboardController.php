@@ -27,6 +27,7 @@ use App\Services\ZoomService;
 use App\Support\CourseMaterialHelper;
 use App\Support\EnrollmentStatusHelper;
 use App\Support\LearnerRecordingAccess;
+use App\Support\PlatformTenantScope;
 use App\Support\QuizMaterialHelper;
 
 use Carbon\Carbon;
@@ -324,35 +325,24 @@ class LearnerDashboardController extends Controller
 
 
         $availableCourses = Course::query()
-
             ->where(function ($q) {
-
                 $q->whereRaw('LOWER(COALESCE(status, "")) = ?', ['active'])
-
                     ->orWhereRaw('LOWER(COALESCE(status, "")) = ?', [''])
-
                     ->orWhereNull('status');
-
             })
+            ->orderByDesc('id');
 
-            ->orderByDesc('id')
+        PlatformTenantScope::applyStudentCatalogScope($availableCourses, $student);
 
+        $availableCourses = $availableCourses
             ->get()
-
             ->map(fn (Course $c) => [
-
                 'id' => $c->id,
-
                 'title' => $c->title,
-
                 'description' => $c->description,
-
                 'price' => (float) ($c->price ?? 0),
-
                 'duration' => $c->duration,
-
                 'status' => $c->status,
-
             ]);
 
 

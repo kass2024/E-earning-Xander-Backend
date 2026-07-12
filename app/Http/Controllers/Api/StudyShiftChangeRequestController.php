@@ -326,6 +326,11 @@ class StudyShiftChangeRequestController extends Controller
 
     private function canManageCourse(User $user, int $courseId): bool
     {
+        $course = Course::query()->find($courseId);
+        if (!$course || !\App\Support\PlatformTenantScope::userOwnsCourse($user, $course)) {
+            return false;
+        }
+
         if ($this->isAdmin($user)) {
             return true;
         }

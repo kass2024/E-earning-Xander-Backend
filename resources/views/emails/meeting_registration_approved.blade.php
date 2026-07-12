@@ -36,12 +36,6 @@
                                 <span style="color:#5f6368;">Meeting link</span><br />
                                 <a href="{{ $joinUrl }}" target="_blank" style="color:#1a73e8;text-decoration:none;word-break:break-all;">{{ $displayJoin }}</a>
                             </div>
-                            <div style="margin-top:12px;font-size:13px;color:#5f6368;line-height:1.55;">
-                                Test your setup any time before your appointment.
-                            </div>
-                            <div style="margin-top:6px;font-size:13px;color:#5f6368;line-height:1.55;">
-                                New to {{ $meetBrand }}? Join from your browser — no extra app required.
-                            </div>
                         @else
                             <div style="font-size:14px;color:#3c4043;line-height:1.6;">
                                 Your appointment is confirmed. Your {{ $meetBrand }} join link will be available before the session.

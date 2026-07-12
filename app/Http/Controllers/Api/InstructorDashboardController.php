@@ -61,20 +61,12 @@ class InstructorDashboardController extends Controller
 
     private function canHostMaterial(User $user, CourseMaterial $material): bool
     {
-        $role = strtolower(trim((string) ($user->role ?? '')));
-        if (in_array($role, ['admin', 'staff'], true)) {
-            return true;
-        }
-
-        if ($role === 'partner_company') {
-            return $this->partnerOwnsCourse($user, (int) $material->course_id);
-        }
-
-        if ($role !== 'instructor') {
+        $course = Course::query()->find((int) $material->course_id);
+        if (!$course) {
             return false;
         }
 
-        return $this->courseIdsFor($user)->contains($material->course_id);
+        return $this->canHostCourse($user, $course);
     }
 
     private function canHostCourse(User $user, ?Course $course): bool
@@ -83,13 +75,14 @@ class InstructorDashboardController extends Controller
             return false;
         }
 
-        $role = strtolower(trim((string) ($user->role ?? '')));
-        if (in_array($role, ['admin', 'staff'], true)) {
-            return true;
+        // Strict ownership: hub hosts hub courses only; partners host their courses only.
+        if (!PlatformTenantScope::userOwnsCourse($user, $course)) {
+            return false;
         }
 
-        if ($role === 'partner_company') {
-            return $this->partnerOwnsCourse($user, (int) $course->id);
+        $role = strtolower(trim((string) ($user->role ?? '')));
+        if (in_array($role, ['admin', 'staff', 'partner_company'], true)) {
+            return true;
         }
 
         if ($role !== 'instructor') {
@@ -388,17 +381,14 @@ class InstructorDashboardController extends Controller
 
     private function liveClassesForPortalActor(Request $request, User $actor, $courseId)
     {
-        $tenantId = PlatformTenantScope::resolveTenantId($request);
-
         $coursesQuery = Course::query()
             ->withCount([
                 'enrollments as paid_enrollments_count' => fn ($q) => $q->whereIn('status', ['paid', 'completed']),
             ])
             ->orderBy('title');
 
-        if ($tenantId !== null) {
-            $coursesQuery->where('platform_institution_id', $tenantId);
-        }
+        // Hub sees hub courses only; partners see their institution courses only.
+        PlatformTenantScope::applyToQuery($coursesQuery, $request);
 
         $courses = $coursesQuery
             ->get()
@@ -954,6 +944,23 @@ class InstructorDashboardController extends Controller
             'status' => 'Pending',
         ];
         CourseDetailsHelper::applyToPayload($payload, $details, $data['title']);
+
+        // Stamp the instructor's institution so courses never leak into another tenant.
+        PlatformTenantScope::stampInstitutionId($request, $payload);
+        PlatformTenantScope::stampInstitutionIdForUser($instructor, $payload);
+
+        $program = \App\Models\ElearningProgram::query()->findOrFail($data['program_id']);
+        if (($payload['platform_institution_id'] ?? null) !== null) {
+            if ((int) ($program->platform_institution_id ?? 0) !== (int) $payload['platform_institution_id']) {
+                return response()->json([
+                    'message' => 'Choose a program that belongs to your institution.',
+                ], 422);
+            }
+        } elseif ($program->platform_institution_id !== null) {
+            return response()->json([
+                'message' => 'Choose a main-platform program for hub courses.',
+            ], 422);
+        }
 
         $course = Course::create($payload);
 

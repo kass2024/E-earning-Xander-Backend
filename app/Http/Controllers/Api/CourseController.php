@@ -55,23 +55,12 @@ class CourseController extends Controller
     {
         $programId = $request->query('program_id');
         $tenantId = PlatformTenantScope::resolveTenantId($request);
-        $cacheKey = ($tenantId ? 'inst_' . $tenantId . '_' : '') . ($programId ? 'program_' . $programId : 'all');
+        $cacheKey = 'owned_' . ($tenantId !== null ? 'inst_' . $tenantId : 'hub')
+            . ($programId ? '_program_' . $programId : '_all');
 
-        if ($tenantId !== null) {
-            $query = Course::with('program:id,name')
-                ->where('platform_institution_id', $tenantId)
-                ->orderByDesc('id');
-
-            if ($programId) {
-                $query->where('program_id', $programId);
-            }
-
-            return response()->json($query->get(), 200);
-        }
-
-        $courses = ApiListCache::remember('courses', $cacheKey, 120, function () use ($programId) {
-            $query = Course::with('program:id,name')
-                ->orderByDesc('id');
+        $courses = ApiListCache::remember('courses', $cacheKey, 120, function () use ($request, $programId) {
+            $query = Course::with('program:id,name')->orderByDesc('id');
+            PlatformTenantScope::applyToQuery($query, $request);
 
             if ($programId) {
                 $query->where('program_id', $programId);
@@ -265,6 +254,9 @@ class CourseController extends Controller
             'auto_approve' => 'nullable|boolean',
         ]);
 
+        $student = Student::findOrFail($data['student_id']);
+        PlatformTenantScope::assertStudentCanAccessCourse($student, $course);
+
         $shiftIds = array_values(array_unique(array_filter(
             array_map('intval', $data['study_shift_ids'] ?? [])
         )));
@@ -307,7 +299,6 @@ class CourseController extends Controller
 
         $enrollment->load('studyShifts');
 
-        $student = Student::find($data['student_id']);
         if ($student && $student->email) {
             if ($autoApprove) {
                 $this->mail->sendTo(
@@ -404,6 +395,8 @@ class CourseController extends Controller
 
     public function scheduleClass(Request $request, Course $course)
     {
+        PlatformTenantScope::assertCanAccess($request, $course);
+
         $data = $request->validate([
             'start_time' => 'required|date',
             'instructor_email' => 'nullable|email',
@@ -633,8 +626,10 @@ class CourseController extends Controller
         ]);
     }
 
-    public function enrolledStudents(Course $course)
+    public function enrolledStudents(Request $request, Course $course)
     {
+        PlatformTenantScope::assertCanAccess($request, $course);
+
         $enrollments = CourseEnrollment::with(['student', 'studyShifts'])
             ->where('course_id', $course->id)
             ->get();

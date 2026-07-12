@@ -25,7 +25,9 @@ trait ResolvesEnrollmentStaff
             return null;
         }
 
-        return User::query()->where('email', $email)->first();
+        return User::query()
+            ->whereRaw('LOWER(TRIM(email)) = ?', [strtolower(trim((string) $email))])
+            ->first();
     }
 
     protected function isEnrollmentAdmin(User $user): bool
@@ -40,21 +42,49 @@ trait ResolvesEnrollmentStaff
 
     protected function instructorManagesCourse(User $user, Course $course): bool
     {
-        return $user->assignedCourses()->where('courses.id', $course->id)->exists();
+        if (!$user->assignedCourses()->where('courses.id', $course->id)->exists()) {
+            return false;
+        }
+
+        return PlatformTenantScope::userOwnsCourse($user, $course);
     }
 
     /**
-     * When an actor is identified (email or auth), enforce course access for instructors.
-     * Legacy admin calls without email remain allowed.
+     * Enforce course ownership for enrollment management.
      */
     protected function assertCanManageCourseEnrollment(Request $request, Course $course): ?JsonResponse
     {
+        try {
+            PlatformTenantScope::assertCanAccess($request, $course);
+        } catch (\Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException $e) {
+            return response()->json(['message' => $e->getMessage()], 403);
+        }
+
         $actor = $this->resolveEnrollmentActor($request);
         if (!$actor) {
+            // Require an actor identity for enrollment management.
+            return response()->json([
+                'message' => 'Sign in to manage enrollments for this course.',
+            ], 403);
+        }
+
+        if (PlatformInstitutionHelper::isPartnerCompanyAdmin($actor)) {
+            if (!PlatformTenantScope::userOwnsCourse($actor, $course)) {
+                return response()->json([
+                    'message' => 'This course belongs to another institution.',
+                ], 403);
+            }
+
             return null;
         }
 
         if ($this->isEnrollmentAdmin($actor)) {
+            if (!PlatformTenantScope::userOwnsCourse($actor, $course)) {
+                return response()->json([
+                    'message' => 'This course belongs to another institution.',
+                ], 403);
+            }
+
             return null;
         }
 

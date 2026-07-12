@@ -911,7 +911,7 @@ class MeetingRegistrationController extends Controller
         $hostPath = '/meeting/room?webinar_host=1&role=1';
         $hostRoomUrl = $base . $hostPath;
         $participantPath = $meetingId !== ''
-            ? '/meeting/room?meeting_number=' . rawurlencode($meetingId) . '&role=0'
+            ? MeetingRegistrationJoinUrl::participantPath($meetingId, $password !== '' ? $password : null)
             : null;
         $participantUrl = $participantPath ? $base . $participantPath : null;
 
