@@ -1,0 +1,87 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: parrot_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_DATABASE}
+      MYSQL_USER: ${DB_USERNAME}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - parrot_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  backend:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: parrot_backend
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+    volumes:
+      - parrot_backend_storage:/var/www/html/storage
+      - parrot_backend_cache:/var/www/html/bootstrap/cache
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  scheduler:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: parrot_scheduler
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+    command: ["php", "artisan", "schedule:work"]
+    volumes:
+      - parrot_backend_storage:/var/www/html/storage
+      - parrot_backend_cache:/var/www/html/bootstrap/cache
+    depends_on:
+      - backend
+
+  frontend:
+    build:
+      context: ../../E-learning-parrot-frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL}
+        VITE_APP_NAME: ${VITE_APP_NAME:-Xander Learning Hub}
+        VITE_APP_VERSION: ${VITE_APP_VERSION:-1.0.0}
+        VITE_APP_BUILD_ID: ${VITE_APP_BUILD_ID:-prod}
+        VITE_GOOGLE_MAPS_EMBED_KEY: ${VITE_GOOGLE_MAPS_EMBED_KEY:-}
+    container_name: parrot_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: parrot_nginx
+    restart: unless-stopped
+    ports:
+      # Localhost only — Apache keeps public 80/443; never disturb /var/www sites
+      - "127.0.0.1:${PARROT_HTTP_PORT:-8090}:80"
+    volumes:
+      - ./nginx/edge.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - frontend
+      - backend
+
+volumes:
+  parrot_mysql_data:
+  parrot_backend_storage:
+  parrot_backend_cache:

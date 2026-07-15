@@ -25,3 +25,10 @@
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# VPS deploy secrets & DB dumps (scripts sync these via SCP — never GitHub)
+/deploy/.env.production
+/deploy/vps.env
+/deploy/db/*.sql
+/deploy/db/*.sql.gz
+!/deploy/db/.gitkeep
