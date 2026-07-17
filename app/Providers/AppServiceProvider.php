@@ -14,6 +14,7 @@ use App\Services\Meetings\DailyApiService;
 use App\Services\Meetings\DailyMeetingProvider;
 use App\Services\Meetings\ZoomMeetingProvider;
 use App\Services\Meetings\LiveMeetingJoinService;
+use App\Services\Meetings\AdminZoomMeetingJoinService;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
 
@@ -33,6 +34,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(MeetingProviderStatusService::class);
         $this->app->singleton(MeetingProviderManager::class);
         $this->app->singleton(LiveMeetingJoinService::class);
+        $this->app->singleton(AdminZoomMeetingJoinService::class);
     }
 
     public function boot(): void

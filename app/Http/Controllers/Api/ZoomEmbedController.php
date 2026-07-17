@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Models\WebinarSetting;
 use App\Services\LiveClassLobbyService;
 use App\Services\Meetings\LiveMeetingJoinService;
+use App\Services\Meetings\AdminZoomMeetingJoinService;
 use App\Services\Meetings\WebinarDailyService;
 use App\Services\ZoomMeetingSdkService;
 use App\Services\ZoomService;
@@ -33,6 +34,7 @@ class ZoomEmbedController extends Controller
         protected ZoomMeetingBrandingResolver $brandingResolver,
         protected LiveClassLobbyService $lobbyService,
         protected LiveMeetingJoinService $liveMeetingJoin,
+        protected AdminZoomMeetingJoinService $adminZoomJoin,
         protected WebinarDailyService $webinarDaily,
     ) {
     }
@@ -83,14 +85,6 @@ class ZoomEmbedController extends Controller
         }
 
         $rawMeetingNumber = trim((string) ($data['meeting_number'] ?? ''));
-        // Daily room names are alphanumeric; Zoom IDs are numeric-only.
-        $dailyRoom = $this->webinarDaily->isDailyRoomName($rawMeetingNumber)
-            ? $rawMeetingNumber
-            : null;
-        $meetingNumber = $dailyRoom ?? preg_replace('/\D+/', '', $rawMeetingNumber);
-        if ($meetingNumber === '' || $meetingNumber === null) {
-            return response()->json(['message' => 'Provide material_id, meeting_number, or webinar_host.'], 422);
-        }
 
         $userName = trim((string) ($data['user_name'] ?? ''));
         if ($userName === '') {
@@ -99,12 +93,72 @@ class ZoomEmbedController extends Controller
 
         $actorEmail = trim((string) ($data['user_email'] ?? $data['instructor_email'] ?? ''));
         $actorEmail = $actorEmail !== '' ? $actorEmail : null;
+        $sanctumUser = $request->user();
+        if ($actorEmail === null && $sanctumUser && !empty($sanctumUser->email)) {
+            $actorEmail = trim((string) $sanctumUser->email) ?: null;
+        }
         $actorUser = $actorEmail
             ? User::query()->whereRaw('LOWER(email) = ?', [strtolower(trim($actorEmail))])->first()
-            : null;
+            : ($sanctumUser ?: null);
         $platformInstitutionId = $role === 1
-            ? $this->resolveHostTenantInstitutionId($actorUser, $data, null)
+            ? $this->resolveHostTenantInstitutionId($actorUser instanceof User ? $actorUser : null, $data, null)
             : (isset($data['platform_institution_id']) ? (int) $data['platform_institution_id'] : null);
+
+        $trustedOwner = false;
+        if ($sanctumUser) {
+            $appRole = strtolower((string) ($sanctumUser->role ?? ''));
+            $trustedOwner = in_array($appRole, ['admin', 'staff', 'instructor', 'partner_company'], true);
+        }
+
+        $adminMeeting = $rawMeetingNumber !== ''
+            ? $this->adminZoomJoin->findByRoomName($rawMeetingNumber)
+            : null;
+        if ($adminMeeting && $this->adminZoomJoin->isDailyMeeting($adminMeeting)) {
+            try {
+                $dailySdk = $this->adminZoomJoin->buildSdkPayload(
+                    $adminMeeting,
+                    $userName,
+                    $actorEmail ?: ('guest-' . substr(md5($userName . microtime(true)), 0, 10)),
+                    $trustedOwner && $role === 1,
+                );
+            } catch (\Throwable $e) {
+                return response()->json(['message' => $e->getMessage()], 422);
+            }
+
+            $branding = $this->meetingBrandingPayload(
+                $actorEmail,
+                $platformInstitutionId,
+                $this->hostBrandingAllowsActorInstitutionFallback($actorUser instanceof User ? $actorUser : null, $data),
+            );
+            if ($trustedOwner && $role === 1) {
+                $zoomHost = $this->zoomService->resolveConfiguredHostBranding(
+                    $platformInstitutionId,
+                    $actorUser instanceof User && $actorUser->id ? (int) $actorUser->id : null,
+                    $actorEmail,
+                );
+                $branding = $this->brandingResolver->finalizeHostSdkBranding(
+                    $branding,
+                    $zoomHost,
+                    $actorUser instanceof User ? $actorUser : null,
+                );
+                $dailySdk['user_name'] = $this->hostOrgDisplayName($branding);
+            }
+
+            return response()->json(array_merge([
+                'provider' => 'daily',
+                'sdk' => $dailySdk,
+            ], $branding));
+        }
+
+        // Daily room names are alphanumeric; Zoom IDs are numeric-only.
+        $dailyRoom = $this->webinarDaily->isDailyRoomName($rawMeetingNumber)
+            ? $rawMeetingNumber
+            : null;
+        $digitsOnly = preg_replace('/\D+/', '', $rawMeetingNumber);
+        $meetingNumber = $dailyRoom ?? (preg_match('/^\d{9,15}$/', $digitsOnly) ? $digitsOnly : null);
+        if ($meetingNumber === '' || $meetingNumber === null) {
+            return response()->json(['message' => 'Provide material_id, meeting_number, or webinar_host.'], 422);
+        }
 
         if ($dailyRoom) {
             $settings = WebinarSetting::current();
@@ -117,12 +171,6 @@ class ZoomEmbedController extends Controller
             }
             try {
                 // Never trust client role=1 for Daily owner tokens.
-                $sanctumUser = $request->user();
-                $trustedOwner = false;
-                if ($sanctumUser) {
-                    $appRole = strtolower((string) ($sanctumUser->role ?? ''));
-                    $trustedOwner = in_array($appRole, ['admin', 'staff', 'instructor', 'partner_company'], true);
-                }
                 $dailySdk = $this->webinarDaily->buildSdkPayload(
                     $settings,
                     $userName,
@@ -136,15 +184,19 @@ class ZoomEmbedController extends Controller
             $branding = $this->meetingBrandingPayload(
                 $actorEmail,
                 $platformInstitutionId,
-                $this->hostBrandingAllowsActorInstitutionFallback($actorUser, $data),
+                $this->hostBrandingAllowsActorInstitutionFallback($actorUser instanceof User ? $actorUser : null, $data),
             );
             if ($trustedOwner) {
                 $zoomHost = $this->zoomService->resolveConfiguredHostBranding(
                     $platformInstitutionId,
-                    $actorUser?->id ? (int) $actorUser->id : null,
+                    $actorUser instanceof User && $actorUser->id ? (int) $actorUser->id : null,
                     $actorEmail,
                 );
-                $branding = $this->brandingResolver->finalizeHostSdkBranding($branding, $zoomHost, $actorUser);
+                $branding = $this->brandingResolver->finalizeHostSdkBranding(
+                    $branding,
+                    $zoomHost,
+                    $actorUser instanceof User ? $actorUser : null,
+                );
                 $dailySdk['user_name'] = $this->hostOrgDisplayName($branding);
             }
 

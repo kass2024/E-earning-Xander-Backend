@@ -7,6 +7,7 @@ use App\Enums\MeetingProvider;
 use App\Services\MailDeliveryService;
 use App\Services\Meetings\DailyApiService;
 use App\Services\Meetings\DailyPermissionPolicy;
+use App\Services\Meetings\AdminZoomMeetingJoinService;
 use App\Services\PlatformSettingsService;
 use App\Services\ZoomHostAssignmentService;
 use App\Services\Meetings\MeetingProviderStatusService;
@@ -404,6 +405,26 @@ class ZoomController extends Controller
 
     public function deleteMeeting(string $id)
     {
+        $adminMeeting = \App\Models\AdminZoomMeeting::query()
+            ->where('zoom_meeting_id', $id)
+            ->first();
+
+        if ($adminMeeting) {
+            $joinService = app(AdminZoomMeetingJoinService::class);
+            if ($joinService->isDailyMeeting($adminMeeting)) {
+                $joinService->deleteDailyRoom($adminMeeting);
+                AdminZoomMeetingRegistry::unregister($id);
+
+                return response()->json(['message' => 'Meeting deleted']);
+            }
+        }
+
+        if (!preg_match('/^\d{9,15}$/', preg_replace('/\D+/', '', $id))) {
+            AdminZoomMeetingRegistry::unregister($id);
+
+            return response()->json(['message' => 'Meeting removed']);
+        }
+
         $ok = $this->zoom->deleteMeeting($id);
         if (!$ok) {
             return response()->json(['message' => 'Unable to delete meeting on Zoom'], 500);

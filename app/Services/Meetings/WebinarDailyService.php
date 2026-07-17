@@ -61,7 +61,8 @@ class WebinarDailyService
         if ($name === '') {
             return false;
         }
-        if (str_starts_with($name, 'webinar-') || str_starts_with($name, 'daily-') || str_starts_with($name, 'inst-') || str_starts_with($name, 'cohort-')) {
+        if (str_starts_with($name, 'webinar-') || str_starts_with($name, 'daily-') || str_starts_with($name, 'inst-') || str_starts_with($name, 'cohort-')
+            || str_starts_with($name, 'admin-meet-') || str_starts_with($name, 'admin-webinar-')) {
             return true;
         }
         if (preg_match('/^\d{9,15}$/', $name)) {
