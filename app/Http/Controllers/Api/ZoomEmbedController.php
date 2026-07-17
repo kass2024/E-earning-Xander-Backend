@@ -86,13 +86,18 @@ class ZoomEmbedController extends Controller
 
         $rawMeetingNumber = trim((string) ($data['meeting_number'] ?? ''));
 
-        $userName = trim((string) ($data['user_name'] ?? ''));
-        if ($userName === '') {
-            $userName = $role === 1 ? 'Host' : 'Guest';
-        }
-
         $actorEmail = trim((string) ($data['user_email'] ?? $data['instructor_email'] ?? ''));
         $actorEmail = $actorEmail !== '' ? $actorEmail : null;
+
+        $userName = trim((string) ($data['user_name'] ?? ''));
+        // Invite links set user_email — use that as the guest display name instead of generic "Guest".
+        if ($userName === '' || strcasecmp($userName, 'Guest') === 0) {
+            if ($role !== 1 && $actorEmail) {
+                $userName = $actorEmail;
+            } elseif ($userName === '') {
+                $userName = $role === 1 ? 'Host' : 'Guest';
+            }
+        }
         $sanctumUser = $request->user();
         if ($actorEmail === null && $sanctumUser && !empty($sanctumUser->email)) {
             $actorEmail = trim((string) $sanctumUser->email) ?: null;

@@ -408,8 +408,9 @@ class ZoomController extends Controller
             }
 
             // Always send our app-domain join link (Daily rooms are private — raw daily.co fails with "not allowed").
+            // Include email as both user_email and user_name so the guest tile shows who was invited.
             $joinUrl = $meetingId !== ''
-                ? MeetingJoinUrl::participantUrl($meetingId, $email)
+                ? MeetingJoinUrl::participantUrl($meetingId, $email, $email)
                 : MeetingJoinUrl::preferAppJoinUrl($data['join_url'] ?? null, $meetingId);
 
             $lines = [$subject];
