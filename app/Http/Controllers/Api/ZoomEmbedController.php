@@ -132,6 +132,11 @@ class ZoomEmbedController extends Controller
                 $brandingInstitutionId,
                 false,
             );
+            if ($brandingInstitutionId === null) {
+                unset($branding['institution'], $branding['use_institution_logo']);
+                $branding['use_hub_branding'] = true;
+                $branding['is_main_platform_host'] = true;
+            }
             $branding['session_title'] = trim((string) ($adminMeeting->topic ?? '')) ?: 'Meeting';
             $branding['meeting_mode'] = strtolower(trim((string) (
                 $adminMeeting->meeting_mode
@@ -203,6 +208,11 @@ class ZoomEmbedController extends Controller
                 $brandingInstitutionId,
                 false,
             );
+            if ($brandingInstitutionId === null) {
+                unset($branding['institution'], $branding['use_institution_logo']);
+                $branding['use_hub_branding'] = true;
+                $branding['is_main_platform_host'] = true;
+            }
             $branding['session_title'] = 'Webinar';
             $branding['meeting_mode'] = 'webinar';
             if ($trustedOwner && $role === 1) {
