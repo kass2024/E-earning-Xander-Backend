@@ -376,6 +376,26 @@ Route::prefix('admin')->group(function () {
     Route::post('meetings/moderation/deny-hand', [\App\Http\Controllers\Api\MeetingModerationController::class, 'denyHand']);
     Route::post('meetings/moderation/leave', [\App\Http\Controllers\Api\MeetingModerationController::class, 'leaveSession']);
 
+    /*** ---------------- MEETING ENGAGEMENT (Q&A / polls / breakouts / stage) ---------------- ***/
+    Route::get('meetings/engagement/questions', [\App\Http\Controllers\Api\MeetingEngagementController::class, 'listQuestions']);
+    Route::post('meetings/engagement/questions', [\App\Http\Controllers\Api\MeetingEngagementController::class, 'askQuestion']);
+    Route::post('meetings/engagement/questions/upvote', [\App\Http\Controllers\Api\MeetingEngagementController::class, 'upvoteQuestion']);
+    Route::post('meetings/engagement/questions/answer', [\App\Http\Controllers\Api\MeetingEngagementController::class, 'answerQuestion']);
+    Route::get('meetings/engagement/polls', [\App\Http\Controllers\Api\MeetingEngagementController::class, 'listPolls']);
+    Route::post('meetings/engagement/polls', [\App\Http\Controllers\Api\MeetingEngagementController::class, 'createPoll']);
+    Route::post('meetings/engagement/polls/open', [\App\Http\Controllers\Api\MeetingEngagementController::class, 'openPoll']);
+    Route::post('meetings/engagement/polls/close', [\App\Http\Controllers\Api\MeetingEngagementController::class, 'closePoll']);
+    Route::post('meetings/engagement/polls/vote', [\App\Http\Controllers\Api\MeetingEngagementController::class, 'votePoll']);
+    Route::get('meetings/engagement/breakouts', [\App\Http\Controllers\Api\MeetingEngagementController::class, 'listBreakouts']);
+    Route::post('meetings/engagement/breakouts', [\App\Http\Controllers\Api\MeetingEngagementController::class, 'createBreakouts']);
+    Route::post('meetings/engagement/breakouts/assign', [\App\Http\Controllers\Api\MeetingEngagementController::class, 'assignBreakout']);
+    Route::post('meetings/engagement/breakouts/open', [\App\Http\Controllers\Api\MeetingEngagementController::class, 'openBreakouts']);
+    Route::post('meetings/engagement/breakouts/close', [\App\Http\Controllers\Api\MeetingEngagementController::class, 'closeBreakouts']);
+    Route::get('meetings/engagement/stage', [\App\Http\Controllers\Api\MeetingEngagementController::class, 'listStage']);
+    Route::post('meetings/engagement/stage/reorder', [\App\Http\Controllers\Api\MeetingEngagementController::class, 'reorderStage']);
+    Route::get('meetings/engagement/speaking-timer', [\App\Http\Controllers\Api\MeetingEngagementController::class, 'speakingTimer']);
+    Route::post('meetings/engagement/expire-timers', [\App\Http\Controllers\Api\MeetingEngagementController::class, 'expireTimers']);
+
     // Temporary: test if Zoom OAuth token can be obtained
     Route::get('zoom/test-token', function (ZoomService $zoom) {
         $ref = new \ReflectionClass($zoom);

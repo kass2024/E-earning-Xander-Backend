@@ -52,6 +52,14 @@ fi
 echo "==> Build & start containers (127.0.0.1:8090 only)"
 docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
 
+# Always recreate edge nginx after frontend/backend rebuilds so upstream DNS
+# never points at a stale container IP (classic 502 Bad Gateway cause).
+echo "==> Recreate edge nginx (refresh Docker DNS upstreams)"
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d --force-recreate --no-deps nginx
+
+echo "==> Run migrations"
+docker compose -f docker-compose.prod.yml --env-file .env.production exec -T backend php artisan migrate --force || true
+
 if [ "$IMPORT_DB" = "1" ]; then
   DUMP=""
   if [ -f "$DEPLOY/db/latest.sql.gz" ]; then
@@ -97,6 +105,14 @@ fi
 echo "==> Health checks"
 curl -sS -o /dev/null -w "frontend:%{http_code}\n" -H "Host: xanderglobalacademy.com" http://127.0.0.1:8090/ || true
 curl -sS -o /dev/null -w "api_up:%{http_code}\n" -H "Host: api.xanderglobalacademy.com" http://127.0.0.1:8090/up || true
+curl -sS -o /dev/null -w "public_https:%{http_code}\n" https://xanderglobalacademy.com/ || true
+
+if [ -f "$DEPLOY/scripts/e2e_meeting_engagement.php" ]; then
+  echo "==> E2E public smoke"
+  docker compose -f docker-compose.prod.yml --env-file .env.production exec -T backend \
+    php /var/www/html/deploy/scripts/e2e_meeting_engagement.php || \
+    php "$DEPLOY/scripts/e2e_meeting_engagement.php" || true
+fi
 
 docker compose -f docker-compose.prod.yml --env-file .env.production ps
 echo "DONE. Front https://xanderglobalacademy.com | API https://api.xanderglobalacademy.com"
