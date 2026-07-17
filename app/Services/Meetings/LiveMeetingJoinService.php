@@ -124,11 +124,11 @@ class LiveMeetingJoinService
         }
 
         $meta = is_array($material->metadata) ? $material->metadata : [];
-        $institutionId = (int) ($meta['platform_institution_id'] ?? 1);
+        $institutionId = (int) ($meta['platform_institution_id'] ?? 0);
         $courseId = (int) ($material->course_id ?? 1);
         $hostUserId = isset($meta['host_user_id']) ? (int) $meta['host_user_id'] : null;
         $roomName = $this->daily->generateRoomName(
-            max(1, $institutionId),
+            $institutionId > 0 ? $institutionId : 0,
             max(1, $courseId),
             $material->id,
             $hostUserId && $hostUserId > 0 ? $hostUserId : null,

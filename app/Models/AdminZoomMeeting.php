@@ -17,6 +17,7 @@ class AdminZoomMeeting extends Model
         'password',
         'agenda',
         'created_by_user_id',
+        'platform_institution_id',
         'meta',
         'meeting_provider',
         'meeting_mode',
@@ -29,6 +30,7 @@ class AdminZoomMeeting extends Model
         'start_time' => 'datetime',
         'duration' => 'integer',
         'meta' => 'array',
+        'platform_institution_id' => 'integer',
     ];
 
     public function createdBy(): BelongsTo
@@ -41,17 +43,23 @@ class AdminZoomMeeting extends Model
      */
     public function toMeetingArray(): array
     {
+        $roomId = trim((string) ($this->daily_room_name ?: $this->zoom_meeting_id ?? ''));
+        $appJoinUrl = $roomId !== ''
+            ? \App\Support\MeetingJoinUrl::participantUrl($roomId)
+            : \App\Support\MeetingJoinUrl::preferAppJoinUrl($this->join_url, $this->zoom_meeting_id);
+
         return array_filter([
             'id' => $this->zoom_meeting_id,
             'uuid' => $this->zoom_uuid,
             'topic' => $this->topic,
             'start_time' => $this->start_time?->toIso8601String(),
             'duration' => $this->duration,
-            'join_url' => $this->join_url,
+            'join_url' => $appJoinUrl ?: $this->join_url,
             'password' => $this->password,
             'agenda' => $this->agenda,
             'provider' => $this->meeting_provider ?: ($this->meta['meeting_provider'] ?? null),
             'meeting_mode' => $this->meeting_mode ?: ($this->meta['meeting_mode'] ?? $this->meta['type'] ?? null),
+            'platform_institution_id' => $this->platform_institution_id,
             'daily_room_name' => $this->daily_room_name,
             'session_status' => $this->session_status,
         ], static fn ($value) => $value !== null && $value !== '');

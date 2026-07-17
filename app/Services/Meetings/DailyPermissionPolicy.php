@@ -118,7 +118,22 @@ class DailyPermissionPolicy
      */
     protected function attendeeProps(string $mode): array
     {
-        // Webinar audience: receive-only, no publish. Meeting attendees: same until host grants.
+        // Webinar audience: listen-only until host invites to stage.
+        if ($mode === self::MODE_WEBINAR) {
+            return [
+                'is_owner' => false,
+                'start_audio_off' => true,
+                'start_video_off' => true,
+                'enable_screenshare' => false,
+                'permissions' => [
+                    'hasPresence' => true,
+                    'canSend' => false,
+                    'canAdmin' => false,
+                ],
+            ];
+        }
+
+        // Meeting: join muted / camera off, but allowed to unmute and turn camera on.
         return [
             'is_owner' => false,
             'start_audio_off' => true,
@@ -126,8 +141,7 @@ class DailyPermissionPolicy
             'enable_screenshare' => false,
             'permissions' => [
                 'hasPresence' => true,
-                // Empty send set blocks audio/video/screenshare until host updateParticipant.
-                'canSend' => false,
+                'canSend' => ['audio', 'video'],
                 'canAdmin' => false,
             ],
         ];

@@ -36,8 +36,9 @@ class DailyMeetingProvider implements MeetingProviderInterface
 
         $institutionId = (int) ($request->platformInstitutionId ?? 0);
         $courseId = (int) ($request->courseId ?? 0);
+        // Pass 0 for hub so generateRoomName uses "main" (not inst-1 which collides with institution id 1).
         $roomName = $this->daily->generateRoomName(
-            $institutionId > 0 ? $institutionId : 1,
+            $institutionId > 0 ? $institutionId : 0,
             $courseId > 0 ? $courseId : 1,
             $request->materialId,
             $request->actorUserId,

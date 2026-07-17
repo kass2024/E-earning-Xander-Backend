@@ -15,6 +15,7 @@ use App\Services\ZoomService;
 use App\Support\AdminRecordingCatalog;
 use App\Support\AdminZoomMeetingRegistry;
 use App\Support\FrontendUrl;
+use App\Support\MeetingJoinUrl;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -52,7 +53,12 @@ class ZoomController extends Controller
             $zoomMeetings = $data['meetings'];
         }
 
-        $meetings = AdminZoomMeetingRegistry::meetingsForManagementPage($zoomMeetings);
+        $user = $request->user();
+        $meetings = AdminZoomMeetingRegistry::meetingsForManagementPage(
+            $zoomMeetings,
+            $user && !empty($user->platform_institution_id) ? (int) $user->platform_institution_id : null,
+            $user ? \App\Support\PlatformInstitutionHelper::isMainPlatformAdmin($user) : true,
+        );
         $meetings = $this->zoom->annotateMeetingSessionStatuses($meetings, $hostUser);
 
         if ($request->boolean('include_recordings')) {
@@ -272,6 +278,8 @@ class ZoomController extends Controller
                 ]));
                 $resolvedName = (string) ($room['name'] ?? $roomName);
                 $roomUrl = (string) ($room['url'] ?? $daily->roomUrl($resolvedName));
+                $appJoinUrl = MeetingJoinUrl::participantUrl($resolvedName);
+                $appHostUrl = MeetingJoinUrl::hostUrl($resolvedName);
 
                 $data = [
                     'id' => $resolvedName,
@@ -279,8 +287,9 @@ class ZoomController extends Controller
                     'topic' => (string) ($payload['topic'] ?? 'Meeting'),
                     'start_time' => $startAt->toIso8601String(),
                     'duration' => $duration,
-                    'join_url' => $roomUrl,
-                    'start_url' => $roomUrl,
+                    'join_url' => $appJoinUrl,
+                    'start_url' => $appHostUrl,
+                    'provider_join_url' => $roomUrl,
                     'password' => null,
                     'agenda' => $payload['agenda'] ?? null,
                     'provider' => 'daily',
@@ -294,6 +303,7 @@ class ZoomController extends Controller
                     'meeting_mode' => $meetingMode,
                     'daily_room_name' => $resolvedName,
                     'daily_room_url' => $roomUrl,
+                    'platform_institution_id' => $institutionId,
                 ]));
 
                 if (!empty($payload['invite_emails'])) {
@@ -306,8 +316,8 @@ class ZoomController extends Controller
                     'zoom' => $data,
                     'host_name' => $user->name ?? null,
                     'host_email' => $user->email ?? null,
-                    'start_url' => $roomUrl,
-                    'join_url' => $roomUrl,
+                    'start_url' => $appHostUrl,
+                    'join_url' => $appJoinUrl,
                 ], 201);
             } catch (\Throwable $e) {
                 Log::error('Daily admin meeting create failed', ['error' => $e->getMessage()]);
@@ -343,17 +353,29 @@ class ZoomController extends Controller
         AdminZoomMeetingRegistry::register($data, $user?->id, array_merge($payload, [
             'meeting_provider' => 'zoom',
             'meeting_mode' => $meetingMode,
+            'platform_institution_id' => $institutionId,
         ]));
+
+        $meetingId = trim((string) ($data['id'] ?? ''));
+        $appJoinUrl = $meetingId !== ''
+            ? MeetingJoinUrl::participantUrl($meetingId)
+            : ($data['join_url'] ?? null);
+        $appHostUrl = $meetingId !== ''
+            ? MeetingJoinUrl::hostUrl($meetingId)
+            : ($data['start_url'] ?? null);
 
         // Include host details and explicit links in the response
         $responseBody = [
             'provider' => 'zoom',
             'meeting_mode' => $meetingMode,
-            'zoom' => $data,
+            'zoom' => array_merge(is_array($data) ? $data : [], [
+                'join_url' => $appJoinUrl,
+                'start_url' => $appHostUrl,
+            ]),
             'host_name' => $user->name ?? null,
             'host_email' => $user->email ?? null,
-            'start_url' => $data['start_url'] ?? null,
-            'join_url' => $data['join_url'] ?? null,
+            'start_url' => $appHostUrl,
+            'join_url' => $appJoinUrl,
         ];
 
         return response()->json($responseBody, 201);
@@ -371,29 +393,38 @@ class ZoomController extends Controller
             return;
         }
 
-        $subject = 'Meeting invitation: ' . ($data['topic'] ?? $payload['topic'] ?? 'Meeting');
-        $joinUrl = $data['join_url'] ?? null;
-        $password = $data['password'] ?? ($payload['password'] ?? null);
+        $topic = (string) ($data['topic'] ?? $payload['topic'] ?? 'Meeting');
+        $isWebinar = strtolower((string) ($payload['type'] ?? $data['meeting_mode'] ?? 'meeting')) === 'webinar';
+        $subject = ($isWebinar ? 'Webinar invitation: ' : 'Meeting invitation: ') . $topic;
+        $meetingId = trim((string) ($data['id'] ?? $data['uuid'] ?? ''));
         $startTime = $data['start_time'] ?? ($payload['start_time'] ?? null);
-
-        $lines = [$subject];
-        if ($startTime) {
-            $lines[] = 'Time: ' . $startTime;
-        }
-        if ($joinUrl) {
-            $lines[] = 'Join link: ' . $joinUrl;
-        }
-        if ($password) {
-            $lines[] = 'Password: ' . $password;
-        }
-        $lines[] = '';
-        $lines[] = 'Sent from ' . config('app.name') . ' system.';
-        $bodyText = implode("\n", $lines);
+        $password = $data['password'] ?? ($payload['password'] ?? null);
 
         foreach ($emails as $email) {
             if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
                 continue;
             }
+
+            // Always send our app-domain join link (Daily rooms are private — raw daily.co fails with "not allowed").
+            $joinUrl = $meetingId !== ''
+                ? MeetingJoinUrl::participantUrl($meetingId, $email)
+                : MeetingJoinUrl::preferAppJoinUrl($data['join_url'] ?? null, $meetingId);
+
+            $lines = [$subject];
+            if ($startTime) {
+                $lines[] = 'Time: ' . $startTime;
+            }
+            if ($joinUrl) {
+                $lines[] = 'Join link: ' . $joinUrl;
+            }
+            if ($password) {
+                $lines[] = 'Password: ' . $password;
+            }
+            $lines[] = '';
+            $lines[] = 'Open the link above to join. You will enter according to the host settings for this session.';
+            $lines[] = 'Sent from ' . config('app.name') . ' system.';
+            $bodyText = implode("\n", $lines);
+
             $this->mail->sendRaw($bodyText, function ($message) use ($email, $subject) {
                 $message->to($email)->subject($subject);
             }, [

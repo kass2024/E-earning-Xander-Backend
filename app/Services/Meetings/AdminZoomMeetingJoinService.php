@@ -107,7 +107,9 @@ class AdminZoomMeetingJoinService
             userName: $userName,
             userId: $userId,
             isOwner: $isOwner,
-            platformInstitutionId: null,
+            platformInstitutionId: $meeting->platform_institution_id
+                ? (int) $meeting->platform_institution_id
+                : null,
             expiresAt: $expiresAt,
             context: [
                 'meeting_role' => $isOwner

@@ -125,14 +125,17 @@ class ZoomEmbedController extends Controller
                 return response()->json(['message' => $e->getMessage()], 422);
             }
 
+            $brandingInstitutionId = $adminMeeting->platform_institution_id
+                ? (int) $adminMeeting->platform_institution_id
+                : $platformInstitutionId;
             $branding = $this->meetingBrandingPayload(
                 $actorEmail,
-                $platformInstitutionId,
+                $brandingInstitutionId,
                 $this->hostBrandingAllowsActorInstitutionFallback($actorUser instanceof User ? $actorUser : null, $data),
             );
             if ($trustedOwner && $role === 1) {
                 $zoomHost = $this->zoomService->resolveConfiguredHostBranding(
-                    $platformInstitutionId,
+                    $brandingInstitutionId,
                     $actorUser instanceof User && $actorUser->id ? (int) $actorUser->id : null,
                     $actorEmail,
                 );
@@ -161,9 +164,16 @@ class ZoomEmbedController extends Controller
         }
 
         if ($dailyRoom) {
-            $settings = WebinarSetting::current();
-            if (trim((string) ($settings->zoom_meeting_id ?? '')) !== $dailyRoom) {
-                // Allow joining by Daily room name even if settings drifted.
+            // Prefer the institution's webinar settings row that owns this room (never overwrite hub singleton).
+            $settings = WebinarSetting::query()
+                ->where('zoom_meeting_id', $dailyRoom)
+                ->first();
+            if (!$settings) {
+                $settings = WebinarSetting::forInstitution(
+                    $actorUser instanceof User && !empty($actorUser->platform_institution_id)
+                        ? (int) $actorUser->platform_institution_id
+                        : null
+                );
                 $settings->zoom_meeting_id = $dailyRoom;
                 if (trim((string) ($settings->zoom_join_url ?? '')) === '' || !str_contains(strtolower((string) $settings->zoom_join_url), 'daily.co')) {
                     $settings->zoom_join_url = app(\App\Services\Meetings\DailyApiService::class)->roomUrl($dailyRoom);
@@ -175,20 +185,23 @@ class ZoomEmbedController extends Controller
                     $settings,
                     $userName,
                     $actorEmail ?: ('guest-' . substr(md5($userName . microtime(true)), 0, 10)),
-                    $trustedOwner,
+                    $trustedOwner && $role === 1,
                 );
             } catch (\Throwable $e) {
                 return response()->json(['message' => $e->getMessage()], 422);
             }
 
+            $brandingInstitutionId = $settings->platform_institution_id
+                ? (int) $settings->platform_institution_id
+                : $platformInstitutionId;
             $branding = $this->meetingBrandingPayload(
                 $actorEmail,
-                $platformInstitutionId,
+                $brandingInstitutionId,
                 $this->hostBrandingAllowsActorInstitutionFallback($actorUser instanceof User ? $actorUser : null, $data),
             );
-            if ($trustedOwner) {
+            if ($trustedOwner && $role === 1) {
                 $zoomHost = $this->zoomService->resolveConfiguredHostBranding(
-                    $platformInstitutionId,
+                    $brandingInstitutionId,
                     $actorUser instanceof User && $actorUser->id ? (int) $actorUser->id : null,
                     $actorEmail,
                 );
@@ -576,19 +589,30 @@ class ZoomEmbedController extends Controller
      */
     protected function buildWebinarHostAuth(array $data): JsonResponse
     {
-        $settings = WebinarSetting::current();
-
-        $storedHost = trim((string) ($settings->zoom_host_user_id ?? ''));
         $actorEmail = trim((string) ($data['user_email'] ?? $data['instructor_email'] ?? ''));
         $actorEmail = $actorEmail !== '' ? $actorEmail : null;
-        if ($storedHost !== '' && str_contains($storedHost, '@')) {
-            $actorEmail = $storedHost;
-        }
         $actorUser = $actorEmail
             ? User::query()->whereRaw('LOWER(email) = ?', [strtolower(trim($actorEmail))])->first()
+            : request()->user();
+
+        $actorInstitutionId = $actorUser instanceof User && !empty($actorUser->platform_institution_id)
+            && !PlatformInstitutionHelper::isMainPlatformAdmin($actorUser)
+            ? (int) $actorUser->platform_institution_id
             : null;
+
+        $settings = WebinarSetting::forInstitution($actorInstitutionId);
+
+        $storedHost = trim((string) ($settings->zoom_host_user_id ?? ''));
+        if ($storedHost !== '' && str_contains($storedHost, '@')) {
+            $actorEmail = $storedHost;
+            $actorUser = User::query()->whereRaw('LOWER(email) = ?', [strtolower(trim($actorEmail))])->first();
+        }
         $settingsInstitutionId = $settings->platform_institution_id ? (int) $settings->platform_institution_id : null;
-        $platformInstitutionId = $this->resolveHostTenantInstitutionId($actorUser, $data, $settingsInstitutionId);
+        $platformInstitutionId = $this->resolveHostTenantInstitutionId(
+            $actorUser instanceof User ? $actorUser : null,
+            $data,
+            $settingsInstitutionId ?? $actorInstitutionId,
+        );
         $zoomHost = $this->zoomService->resolveConfiguredHostBranding(
             $platformInstitutionId,
             $actorUser?->id ? (int) $actorUser->id : null,
@@ -741,14 +765,20 @@ class ZoomEmbedController extends Controller
             && $data['platform_institution_id'] !== null
             && $data['platform_institution_id'] !== '';
 
+        // Never trust a client-supplied tenant unless it matches the authenticated actor.
         if ($hasRequestTenant && (int) $data['platform_institution_id'] > 0) {
-            return (int) $data['platform_institution_id'];
+            $requested = (int) $data['platform_institution_id'];
+            if ($actorUser && (int) ($actorUser->platform_institution_id ?? 0) === $requested) {
+                return $requested;
+            }
+            // Ignore mismatched spoofed tenant ids.
         }
 
         $role = strtolower(trim((string) ($actorUser->role ?? '')));
-        // Hub session: admin/staff with no institution in the request must not inherit a
-        // stale user.platform_institution_id or the course owner's tenant (e.g. Prime Gateway).
-        if (in_array($role, ['admin', 'staff'], true) && !$hasRequestTenant) {
+        // Hub session: admin/staff with no institution must not inherit a stale tenant.
+        if (in_array($role, ['admin', 'staff'], true)
+            && empty($actorUser->platform_institution_id)
+        ) {
             return null;
         }
 
@@ -756,7 +786,7 @@ class ZoomEmbedController extends Controller
             return (int) $actorUser->platform_institution_id;
         }
 
-        // Institution instructors / partners: fall back to course tenant when needed.
+        // Institution instructors / partners: fall back to course/meeting tenant when needed.
         return $courseInstitutionId && $courseInstitutionId > 0 ? $courseInstitutionId : null;
     }
 

@@ -23,6 +23,8 @@ use Illuminate\Validation\ValidationException;
 use App\Services\MailDeliveryService;
 use App\Support\AdminRecordingCatalog;
 use App\Support\FrontendUrl;
+use App\Support\MeetingJoinUrl;
+use App\Support\MeetingRegistrationJoinUrl;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
 
@@ -314,7 +316,12 @@ class MeetingRegistrationController extends Controller
             $this->mail->sendView('emails.meeting_registration_approved', [
                 'appName' => config('app.name'),
                 'name' => $meetingRegistration->full_name ?? '',
-                'joinUrl' => $joinUrl,
+                'joinUrl' => MeetingRegistrationJoinUrl::forRegistration($meetingRegistration)
+                    ?: MeetingJoinUrl::preferAppJoinUrl(
+                        $joinUrl,
+                        trim((string) ($meetingRegistration->zoom_meeting_id ?? ''))
+                    )
+                    ?: $joinUrl,
                 'nextSession' => $nextSessionText,
                 'scheduleDescription' => $scheduleDescription,
                 'learnerNotes' => $learnerNotes,
@@ -348,6 +355,12 @@ class MeetingRegistrationController extends Controller
         if (!$effectiveJoinUrl && !$this->zoom->isConfigured()) {
             $effectiveJoinUrl = (string) config('services.pathways_webinar.zoom_join_url');
         }
+        $effectiveJoinUrl = MeetingRegistrationJoinUrl::forRegistration($meetingRegistration)
+            ?: MeetingJoinUrl::preferAppJoinUrl(
+                $effectiveJoinUrl,
+                trim((string) ($meetingRegistration->zoom_meeting_id ?? ''))
+            )
+            ?: $effectiveJoinUrl;
 
         $tz = (string) config('services.pathways_webinar.timezone', 'Africa/Kigali');
         try {
@@ -419,6 +432,12 @@ class MeetingRegistrationController extends Controller
                 if (!$effectiveJoinUrl && !$this->zoom->isConfigured()) {
                     $effectiveJoinUrl = (string) config('services.pathways_webinar.zoom_join_url');
                 }
+                $effectiveJoinUrl = MeetingRegistrationJoinUrl::forRegistration($meetingRegistration)
+                    ?: MeetingJoinUrl::preferAppJoinUrl(
+                        $effectiveJoinUrl,
+                        trim((string) ($meetingRegistration->zoom_meeting_id ?? ''))
+                    )
+                    ?: $effectiveJoinUrl;
 
                 // Prefer the exact label from the frontend dropdown when available.
                 $nextSessionText = $frontendScheduleLabel;
@@ -527,13 +546,21 @@ class MeetingRegistrationController extends Controller
     private function pathwaysJoinUrl(): ?string
     {
         $settings = WebinarSetting::current();
-        if (!empty($settings->zoom_join_url)) {
-            return (string) $settings->zoom_join_url;
+        $meetingId = trim((string) ($settings->zoom_meeting_id ?? ''));
+        if ($meetingId !== '') {
+            return MeetingRegistrationJoinUrl::participantUrl($meetingId);
+        }
+
+        $stored = trim((string) ($settings->zoom_join_url ?? ''));
+        if ($stored !== '') {
+            return MeetingJoinUrl::preferAppJoinUrl($stored, $meetingId !== '' ? $meetingId : null) ?: $stored;
         }
 
         $url = trim((string) config('services.pathways_webinar.zoom_join_url', ''));
 
-        return $url !== '' ? $url : null;
+        return $url !== ''
+            ? (MeetingJoinUrl::preferAppJoinUrl($url, null) ?: $url)
+            : null;
     }
 
     private function syncApprovedRegistrationZoomLinks(?string $joinUrl, ?string $meetingId): void
@@ -910,15 +937,16 @@ class MeetingRegistrationController extends Controller
         $registrationUrl = $base . '/meeting-registration';
         $hostPath = '/meeting/room?webinar_host=1&role=1';
         $hostRoomUrl = $base . $hostPath;
-        $participantPath = $meetingId !== ''
-            ? MeetingRegistrationJoinUrl::participantPath($meetingId, $password !== '' ? $password : null)
-            : null;
-        $participantUrl = $participantPath ? $base . $participantPath : null;
 
         $password = '';
         if (!$isDaily && Schema::hasColumn('webinar_settings', 'zoom_password')) {
             $password = trim((string) ($settings->zoom_password ?? ''));
         }
+
+        $participantPath = $meetingId !== ''
+            ? MeetingRegistrationJoinUrl::participantPath($meetingId, $password !== '' ? $password : null)
+            : null;
+        $participantUrl = $participantPath ? $base . $participantPath : null;
 
         $lines = ['Meeting Registration — Pathways Webinar'];
         if ($settings->zoom_scheduled_at) {

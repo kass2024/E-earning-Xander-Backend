@@ -94,6 +94,7 @@ class ZoomMeetingBrandingResolver
         array $zoomHostContext,
         ?User $actorUser,
     ): array {
+        $useInstitutionBranding = (bool) ($branding['use_institution_logo'] ?? false);
         $isMainPlatformHost = $actorUser && (
             PlatformInstitutionHelper::isMainPlatformAdmin($actorUser)
             || (
@@ -103,7 +104,6 @@ class ZoomMeetingBrandingResolver
         );
         $actorEmail = $actorUser?->email;
         $isConfiguredZoomHost = $this->isConfiguredZoomHostActor($zoomHostContext, $actorEmail);
-        $useInstitutionBranding = (bool) ($branding['use_institution_logo'] ?? false);
 
         if ($isMainPlatformHost) {
             unset($branding['use_institution_logo'], $branding['institution']);

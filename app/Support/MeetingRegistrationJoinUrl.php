@@ -16,7 +16,7 @@ class MeetingRegistrationJoinUrl
     ): string {
         $raw = trim($meetingId);
         // Daily room names stay intact; Zoom IDs are digits-only.
-        $isDailyRoom = (bool) preg_match('/^(webinar-|daily-|inst-|cohort-)/i', $raw)
+        $isDailyRoom = (bool) preg_match('/^(admin-meet-|admin-webinar-|webinar-|daily-|inst-|cohort-)/i', $raw)
             || (!preg_match('/^\d{9,15}$/', $raw) && preg_match('/[a-zA-Z_-]/', $raw));
         $meetingNumber = $isDailyRoom ? $raw : preg_replace('/\D+/', '', $raw);
 
@@ -49,8 +49,11 @@ class MeetingRegistrationJoinUrl
 
     public static function forRegistration(MeetingRegistration $registration): ?string
     {
+        $institutionId = !empty($registration->platform_institution_id)
+            ? (int) $registration->platform_institution_id
+            : null;
+        $settings = WebinarSetting::forInstitution($institutionId);
         $meetingId = trim((string) ($registration->zoom_meeting_id ?? ''));
-        $settings = WebinarSetting::current();
 
         if ($meetingId === '') {
             $meetingId = trim((string) ($settings->zoom_meeting_id ?? ''));
@@ -60,6 +63,7 @@ class MeetingRegistrationJoinUrl
             return null;
         }
 
+        // Always prefer our app-domain join page (Daily/Zoom provider URLs fail for private rooms).
         return self::participantUrl(
             $meetingId,
             self::resolvePassword($registration, $settings),
@@ -70,7 +74,10 @@ class MeetingRegistrationJoinUrl
 
     private static function resolvePassword(MeetingRegistration $registration, ?WebinarSetting $settings = null): ?string
     {
-        $settings ??= WebinarSetting::current();
+        $institutionId = !empty($registration->platform_institution_id)
+            ? (int) $registration->platform_institution_id
+            : null;
+        $settings ??= WebinarSetting::forInstitution($institutionId);
 
         if (Schema::hasColumn('webinar_settings', 'zoom_password')) {
             $password = trim((string) ($settings->zoom_password ?? ''));

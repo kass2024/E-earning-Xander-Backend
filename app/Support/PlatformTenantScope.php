@@ -7,6 +7,7 @@ use App\Models\Student;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
@@ -129,13 +130,14 @@ class PlatformTenantScope
     /**
      * Restrict a query to the caller's owned tenant resources.
      *
-     * @param  Builder<Model>  $query
+     * @param  Builder<Model>|Relation  $query
+     * @return Builder<Model>|Relation
      */
     public static function applyToQuery(
-        Builder $query,
+        Builder|Relation $query,
         Request $request,
         string $column = 'platform_institution_id',
-    ): Builder {
+    ): Builder|Relation {
         $table = $query->getModel()->getTable();
         if (!Schema::hasColumn($table, $column)) {
             return $query;
