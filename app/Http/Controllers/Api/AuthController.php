@@ -273,7 +273,15 @@ class AuthController extends Controller
 
         $username = PlatformUserService::normalizeEmail($data['username']);
         $password = $data['password'];
+        $portalSlug = !empty($data['institution_slug'])
+            ? strtolower(trim((string) $data['institution_slug']))
+            : null;
         $portalInstitutionId = $this->resolvePortalInstitutionId($data);
+
+        // Branded institution URL must resolve to a real institution — otherwise nobody can sign in here.
+        if ($portalSlug !== null && $portalSlug !== '' && $portalInstitutionId === null) {
+            return response()->json(['message' => 'Invalid credentials'], 401);
+        }
 
         $defaultPassword = '12345678';
 
@@ -406,9 +414,13 @@ class AuthController extends Controller
             ]);
         }
 
-        // Legacy agents table (instructors)
+        // Legacy agents table (instructors) — never valid on an institution-branded login portal.
         $agent = Agent::where('email', $username)->orWhere('name', $username)->first();
         if ($agent && $verify($agent)) {
+            if ($portalInstitutionId !== null) {
+                return response()->json(['message' => 'Invalid credentials'], 401);
+            }
+
             return response()->json([
                 'message' => 'Login successful',
                 'role' => 'instructor',
@@ -546,12 +558,12 @@ class AuthController extends Controller
     {
         if (!empty($data['institution_slug'])) {
             $slug = strtolower(trim((string) $data['institution_slug']));
+            // Resolve by slug regardless of status so the portal lock still applies.
             $institution = PlatformInstitution::query()
                 ->whereRaw('LOWER(slug) = ?', [$slug])
-                ->where('status', 'active')
                 ->first();
 
-            return $institution?->id;
+            return $institution?->id ? (int) $institution->id : null;
         }
 
         if (!empty($data['platform_institution_id'])) {
@@ -562,7 +574,8 @@ class AuthController extends Controller
     }
 
     /**
-     * When logging in via an institution-specific URL, reject accounts from other institutions.
+     * Institution login links are isolated: other institutions and main-platform accounts
+     * are treated as non-existent on this portal (generic Invalid credentials).
      */
     private function rejectIfWrongInstitutionPortal(
         ?int $expectedInstitutionId,
@@ -573,15 +586,16 @@ class AuthController extends Controller
             return null;
         }
 
-        if ($user && PlatformInstitutionHelper::isMainPlatformAdmin($user)) {
-            return null;
+        $userInstitutionId = $userInstitution?->id ? (int) $userInstitution->id : null;
+
+        // Main hub operators / staff / any account without this exact institution link → not found here.
+        if ($userInstitutionId === null || $userInstitutionId !== (int) $expectedInstitutionId) {
+            return response()->json(['message' => 'Invalid credentials'], 401);
         }
 
-        $userInstitutionId = $userInstitution?->id;
-        if ((int) $userInstitutionId !== (int) $expectedInstitutionId) {
-            return response()->json([
-                'message' => 'This account does not belong to this institution. Use the correct institution login link or contact your administrator.',
-            ], 403);
+        // Extra safety: main-platform admins never authenticate via partner portals.
+        if ($user && PlatformInstitutionHelper::isMainPlatformAdmin($user)) {
+            return response()->json(['message' => 'Invalid credentials'], 401);
         }
 
         return null;
