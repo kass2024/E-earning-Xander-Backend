@@ -218,7 +218,8 @@ class MeetingModerationController extends Controller
             return $key;
         }
 
-        if (preg_match('#daily\.co/([^/?#]+)#i', $key, $m)) {
+        // Use ~ delimiter — `#` inside [^/?#] would terminate a #-delimited pattern.
+        if (preg_match('~daily\.co/([^/?#]+)~i', $key, $m)) {
             return rawurldecode($m[1]);
         }
 
