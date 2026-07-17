@@ -449,20 +449,32 @@ class ZoomEmbedController extends Controller
             $courseInstitutionId = !empty($material->course?->platform_institution_id)
                 ? (int) $material->course->platform_institution_id
                 : null;
-            $platformInstitutionId = $this->resolveHostTenantInstitutionId($actorUser, $data, $courseInstitutionId);
+            // Hosts resolve tenant carefully; guests/learners always inherit the course's institution (or hub).
+            $platformInstitutionId = $role === 1
+                ? $this->resolveHostTenantInstitutionId($actorUser, $data, $courseInstitutionId)
+                : $courseInstitutionId;
 
-            $branding = [];
+            $branding = $this->meetingBrandingPayload(
+                $actorEmail,
+                $platformInstitutionId,
+                $role === 1
+                    ? $this->hostBrandingAllowsActorInstitutionFallback($actorUser, $data)
+                    : false,
+            );
+            if ($platformInstitutionId === null) {
+                unset($branding['institution'], $branding['use_institution_logo']);
+                $branding['use_hub_branding'] = true;
+            } else {
+                $branding['use_institution_logo'] = true;
+                unset($branding['use_hub_branding'], $branding['is_main_platform_host']);
+            }
+
             if ($role === 1) {
                 try {
                     $zoomHost = $this->zoomService->resolveConfiguredHostBranding(
                         $platformInstitutionId,
                         $actorUser?->id ? (int) $actorUser->id : null,
                         $actorEmail,
-                    );
-                    $branding = $this->meetingBrandingPayload(
-                        $actorEmail,
-                        $platformInstitutionId,
-                        $this->hostBrandingAllowsActorInstitutionFallback($actorUser, $data),
                     );
                     $branding = $this->brandingResolver->finalizeHostSdkBranding(
                         $branding,
@@ -535,27 +547,36 @@ class ZoomEmbedController extends Controller
         $courseInstitutionId = !empty($material->course?->platform_institution_id)
             ? (int) $material->course->platform_institution_id
             : null;
-        $platformInstitutionId = $this->resolveHostTenantInstitutionId($actorUser, $data, $courseInstitutionId);
+        $platformInstitutionId = $role === 1
+            ? $this->resolveHostTenantInstitutionId($actorUser, $data, $courseInstitutionId)
+            : $courseInstitutionId;
 
-        $zoomHost = $this->zoomService->resolveConfiguredHostBranding(
-            $platformInstitutionId,
-            $actorUser?->id ? (int) $actorUser->id : null,
-            $actorEmail,
-        );
         $branding = $this->meetingBrandingPayload(
             $actorEmail,
             $platformInstitutionId,
             $role === 1
                 ? $this->hostBrandingAllowsActorInstitutionFallback($actorUser, $data)
-                : true,
+                : false,
         );
-        $branding = $this->brandingResolver->finalizeHostSdkBranding(
-            $branding,
-            $zoomHost,
-            $actorUser,
-        );
+        if ($platformInstitutionId === null) {
+            unset($branding['institution'], $branding['use_institution_logo']);
+            $branding['use_hub_branding'] = true;
+        } else {
+            $branding['use_institution_logo'] = true;
+            unset($branding['use_hub_branding'], $branding['is_main_platform_host']);
+        }
 
         if ($role === 1) {
+            $zoomHost = $this->zoomService->resolveConfiguredHostBranding(
+                $platformInstitutionId,
+                $actorUser?->id ? (int) $actorUser->id : null,
+                $actorEmail,
+            );
+            $branding = $this->brandingResolver->finalizeHostSdkBranding(
+                $branding,
+                $zoomHost,
+                $actorUser,
+            );
             // Always org/hub name in Zoom tile — never Zoom profile or personal user name.
             $userName = $this->hostOrgDisplayName($branding);
         }
@@ -846,14 +867,18 @@ class ZoomEmbedController extends Controller
         ?User $actorUser,
         int $role,
     ): ?int {
+        // DB tenant wins — partner sessions wrongly created as admin-*-main-* still brand correctly after repair.
+        $meetingInstitutionId = $meeting->platform_institution_id
+            ? (int) $meeting->platform_institution_id
+            : null;
+        if ($meetingInstitutionId && $meetingInstitutionId > 0) {
+            return $meetingInstitutionId;
+        }
+
         $room = trim((string) ($meeting->daily_room_name ?: $meeting->zoom_meeting_id ?? ''));
         if ($this->isHubScopedDailyRoom($room)) {
             return null;
         }
-
-        $meetingInstitutionId = $meeting->platform_institution_id
-            ? (int) $meeting->platform_institution_id
-            : null;
 
         if ($role === 1 && $actorUser && PlatformInstitutionHelper::isMainPlatformAdmin($actorUser) && $meetingInstitutionId === null) {
             return null;

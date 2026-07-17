@@ -12,10 +12,12 @@ use App\Services\PlatformSettingsService;
 use App\Services\ZoomHostAssignmentService;
 use App\Services\Meetings\MeetingProviderStatusService;
 use App\Services\ZoomService;
+use App\Models\User;
 use App\Support\AdminRecordingCatalog;
 use App\Support\AdminZoomMeetingRegistry;
 use App\Support\FrontendUrl;
 use App\Support\MeetingJoinUrl;
+use App\Support\PlatformInstitutionHelper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -34,10 +36,16 @@ class ZoomController extends Controller
 
     public function listMeetings(Request $request)
     {
-        $institutionId = $request->filled('platform_institution_id')
-            ? (int) $request->input('platform_institution_id')
-            : null;
-        $hostUser = $this->zoom->resolveHostUserId($institutionId);
+        $tenant = $this->resolveManagementTenant($request);
+        if ($tenant['actor'] === null) {
+            return response()->json([
+                'meetings' => [],
+                'message' => 'Sign in required to list meetings.',
+            ], 401);
+        }
+
+        // Shared Zoom host pool — host lookup may use institution for assignment, but list filter is actor-scoped.
+        $hostUser = $this->zoom->resolveHostUserId($tenant['institutionId']);
         $data = $this->zoom->listMeetings($hostUser);
 
         if ($data === null) {
@@ -53,11 +61,10 @@ class ZoomController extends Controller
             $zoomMeetings = $data['meetings'];
         }
 
-        $user = $request->user();
         $meetings = AdminZoomMeetingRegistry::meetingsForManagementPage(
             $zoomMeetings,
-            $user && !empty($user->platform_institution_id) ? (int) $user->platform_institution_id : null,
-            $user ? \App\Support\PlatformInstitutionHelper::isMainPlatformAdmin($user) : true,
+            $tenant['institutionId'],
+            $tenant['isMainAdmin'],
         );
         $meetings = $this->zoom->annotateMeetingSessionStatuses($meetings, $hostUser);
 
@@ -114,8 +121,19 @@ class ZoomController extends Controller
             ], 200);
         }
 
+        $tenant = $this->resolveManagementTenant($request);
+        if ($tenant['actor'] === null) {
+            return response()->json([
+                'recordings' => [],
+                'message' => 'Sign in required to list recordings.',
+            ], 401);
+        }
+
         $refresh = $request->boolean('refresh');
-        $trackedIds = AdminRecordingCatalog::trackedMeetingIds();
+        $trackedIds = AdminRecordingCatalog::trackedMeetingIdsForTenant(
+            $tenant['institutionId'],
+            $tenant['isMainAdmin'],
+        );
         $monthsBack = 3;
         $collected = $this->zoom->cachedCloudRecordings($trackedIds, $monthsBack, $refresh);
 
@@ -242,16 +260,17 @@ class ZoomController extends Controller
 
         $payload = $request->all();
 
-        $user = $request->user();
-        $institutionId = $user
-            && !empty($user->platform_institution_id)
-            && !\App\Support\PlatformInstitutionHelper::isMainPlatformAdmin($user)
-            ? (int) $user->platform_institution_id
-            : null;
+        $tenant = $this->resolveManagementTenant($request);
+        $user = $tenant['actor'];
+        if ($user === null) {
+            return response()->json(['message' => 'Sign in required to create meetings.'], 401);
+        }
+        // Stamp from authenticated actor — never trust client-only platform_institution_id.
+        $institutionId = $tenant['institutionId'];
         $hostId = $this->zoom->resolveHostUserId(
             $institutionId,
-            $user?->id ? (int) $user->id : null,
-            $user?->email,
+            $user->id ? (int) $user->id : null,
+            $user->email,
         );
 
         $isWebinar = strtolower((string) ($payload['type'] ?? 'meeting')) === 'webinar';
@@ -299,7 +318,7 @@ class ZoomController extends Controller
                     'session_status' => 'upcoming',
                 ];
 
-                AdminZoomMeetingRegistry::register($data, $user?->id, array_merge($payload, [
+                AdminZoomMeetingRegistry::register($data, $user->id ? (int) $user->id : null, array_merge($payload, [
                     'type' => $meetingMode,
                     'meeting_provider' => 'daily',
                     'meeting_mode' => $meetingMode,
@@ -352,7 +371,7 @@ class ZoomController extends Controller
             $this->sendInviteEmails($payload, $data, $user);
         }
 
-        AdminZoomMeetingRegistry::register($data, $user?->id, array_merge($payload, [
+        AdminZoomMeetingRegistry::register($data, $user->id ? (int) $user->id : null, array_merge($payload, [
             'meeting_provider' => 'zoom',
             'meeting_mode' => $meetingMode,
             'platform_institution_id' => $institutionId,
@@ -635,5 +654,39 @@ class ZoomController extends Controller
 
         return response()->json($responseBody, 201);
     }
+
+    /**
+     * Resolve hub vs partner tenant for Zoom management APIs.
+     * Auth is email-based (user_email), not Sanctum — never default missing actors to main admin.
+     *
+     * @return array{actor: ?User, institutionId: ?int, isMainAdmin: bool}
+     */
+    private function resolveManagementTenant(Request $request): array
+    {
+        $actor = PlatformInstitutionHelper::resolveActorFromRequest($request) ?: $request->user();
+        if (!$actor instanceof User) {
+            return ['actor' => null, 'institutionId' => null, 'isMainAdmin' => false];
+        }
+
+        $actor = PlatformInstitutionHelper::restorePartnerOwnerRole($actor);
+        $isMainAdmin = PlatformInstitutionHelper::isMainPlatformAdmin($actor);
+
+        $institutionId = null;
+        if (!$isMainAdmin && !empty($actor->platform_institution_id)) {
+            $institutionId = (int) $actor->platform_institution_id;
+        }
+
+        // Partner must have an institution — otherwise they see nothing (never hub).
+        if (!$isMainAdmin && (!$institutionId || $institutionId <= 0)) {
+            return ['actor' => $actor, 'institutionId' => null, 'isMainAdmin' => false];
+        }
+
+        return [
+            'actor' => $actor,
+            'institutionId' => $isMainAdmin ? null : $institutionId,
+            'isMainAdmin' => $isMainAdmin,
+        ];
+    }
 }
+
 

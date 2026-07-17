@@ -69,6 +69,72 @@ class AdminRecordingCatalog
     }
 
     /**
+     * Tenant-scoped meeting IDs for cloud recording lists.
+     *
+     * @return list<string>
+     */
+    public static function trackedMeetingIdsForTenant(?int $institutionId, bool $isMainAdmin): array
+    {
+        $ids = [];
+
+        if (Schema::hasTable('admin_zoom_meetings') && Schema::hasColumn('admin_zoom_meetings', 'platform_institution_id')) {
+            $q = \App\Models\AdminZoomMeeting::query()->whereNotNull('zoom_meeting_id');
+            if ($isMainAdmin) {
+                $q->whereNull('platform_institution_id');
+            } elseif ($institutionId && $institutionId > 0) {
+                $q->where('platform_institution_id', $institutionId);
+            } else {
+                return [];
+            }
+            foreach ($q->pluck('zoom_meeting_id') as $meetingId) {
+                if ($meetingId) {
+                    $ids[] = (string) $meetingId;
+                }
+            }
+        }
+
+        $webinarQuery = WebinarSetting::query()->whereNotNull('zoom_meeting_id');
+        if (Schema::hasColumn('webinar_settings', 'platform_institution_id')) {
+            if ($isMainAdmin) {
+                $webinarQuery->whereNull('platform_institution_id');
+            } elseif ($institutionId && $institutionId > 0) {
+                $webinarQuery->where('platform_institution_id', $institutionId);
+            } else {
+                $webinarQuery->whereRaw('1 = 0');
+            }
+        }
+        foreach ($webinarQuery->pluck('zoom_meeting_id') as $meetingId) {
+            if ($meetingId) {
+                $ids[] = (string) $meetingId;
+            }
+        }
+
+        $materialQuery = CourseMaterial::query()
+            ->whereIn('type', ['zoom', 'daily'])
+            ->whereHas('course', function ($q) use ($institutionId, $isMainAdmin) {
+                if (!Schema::hasColumn('courses', 'platform_institution_id')) {
+                    return;
+                }
+                if ($isMainAdmin) {
+                    $q->whereNull('platform_institution_id');
+                } elseif ($institutionId && $institutionId > 0) {
+                    $q->where('platform_institution_id', $institutionId);
+                } else {
+                    $q->whereRaw('1 = 0');
+                }
+            });
+
+        foreach ($materialQuery->get() as $material) {
+            $meetingId = CourseMaterialHelper::meetingId($material);
+            if ($meetingId) {
+                $ids[] = (string) $meetingId;
+            }
+        }
+
+        return array_values(array_unique($ids));
+    }
+
+    /**
      * @param  list<array<string, mixed>>  $items
      * @return list<array<string, mixed>>
      */

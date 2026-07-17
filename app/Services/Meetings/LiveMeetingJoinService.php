@@ -67,6 +67,14 @@ class LiveMeetingJoinService
             $expiresAt = now()->addHours(4);
         }
 
+        $meta = is_array($material->metadata) ? $material->metadata : [];
+        $institutionId = isset($meta['platform_institution_id']) ? (int) $meta['platform_institution_id'] : 0;
+        if ($institutionId <= 0) {
+            $material->loadMissing('course:id,platform_institution_id');
+            $institutionId = !empty($material->course?->platform_institution_id)
+                ? (int) $material->course->platform_institution_id
+                : 0;
+        }
         $provider = $this->manager->forProvider(MeetingProvider::Daily);
         $join = $provider->buildJoinDetails(new MeetingJoinRequest(
             externalMeetingId: $roomName,
@@ -74,7 +82,7 @@ class LiveMeetingJoinService
             userName: $userName,
             userId: $userId,
             isOwner: $isOwner,
-            platformInstitutionId: isset($meta['platform_institution_id']) ? (int) $meta['platform_institution_id'] : null,
+            platformInstitutionId: $institutionId > 0 ? $institutionId : null,
             expiresAt: $expiresAt,
             context: [
                 'meeting_role' => $isOwner
@@ -125,6 +133,12 @@ class LiveMeetingJoinService
 
         $meta = is_array($material->metadata) ? $material->metadata : [];
         $institutionId = (int) ($meta['platform_institution_id'] ?? 0);
+        if ($institutionId <= 0) {
+            $material->loadMissing('course:id,platform_institution_id');
+            $institutionId = !empty($material->course?->platform_institution_id)
+                ? (int) $material->course->platform_institution_id
+                : 0;
+        }
         $courseId = (int) ($material->course_id ?? 1);
         $hostUserId = isset($meta['host_user_id']) ? (int) $meta['host_user_id'] : null;
         $roomName = $this->daily->generateRoomName(
