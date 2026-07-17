@@ -49,9 +49,7 @@ class MeetingRegistrationJoinUrl
 
     public static function forRegistration(MeetingRegistration $registration): ?string
     {
-        $institutionId = !empty($registration->platform_institution_id)
-            ? (int) $registration->platform_institution_id
-            : null;
+        $institutionId = \App\Support\WebinarTenant::fromRegistration($registration);
         $settings = WebinarSetting::forInstitution($institutionId);
         $meetingId = trim((string) ($registration->zoom_meeting_id ?? ''));
 
@@ -74,9 +72,7 @@ class MeetingRegistrationJoinUrl
 
     private static function resolvePassword(MeetingRegistration $registration, ?WebinarSetting $settings = null): ?string
     {
-        $institutionId = !empty($registration->platform_institution_id)
-            ? (int) $registration->platform_institution_id
-            : null;
+        $institutionId = \App\Support\WebinarTenant::fromRegistration($registration);
         $settings ??= WebinarSetting::forInstitution($institutionId);
 
         if (Schema::hasColumn('webinar_settings', 'zoom_password')) {

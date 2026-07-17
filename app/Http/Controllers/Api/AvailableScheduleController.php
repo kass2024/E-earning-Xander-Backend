@@ -5,7 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\AvailableSchedule;
 use App\Models\MeetingRegistration;
-use App\Models\WebinarSetting;
+use App\Support\PlatformInstitutionHelper;
+use App\Support\WebinarTenant;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
@@ -15,6 +16,25 @@ class AvailableScheduleController extends Controller
     private function ensureDefaultSchedules(): void
     {
         // Availability is managed per date on the admin calendar — no auto weekly rows.
+    }
+
+    private function resolveInstitutionId(Request $request): ?int
+    {
+        $actor = PlatformInstitutionHelper::resolveActorFromRequest($request);
+        $fromActor = WebinarTenant::actorInstitutionId($actor);
+        if ($fromActor) {
+            return $fromActor;
+        }
+
+        // Public institution portal may pass platform_institution_id without auth.
+        if ($request->filled('platform_institution_id')) {
+            $requested = (int) $request->input('platform_institution_id');
+            if ($requested > 0) {
+                return $requested;
+            }
+        }
+
+        return null;
     }
 
     private function syncDayOfWeek(array $data): array
@@ -30,9 +50,9 @@ class AvailableScheduleController extends Controller
         return $data;
     }
 
-    private function calendarPayload(): array
+    private function calendarPayload(?int $institutionId = null): array
     {
-        $settings = WebinarSetting::current();
+        $settings = WebinarTenant::settingsFor($institutionId);
 
         return [
             'blocked_months' => array_values($settings->calendar_blocked_months ?? []),
@@ -40,20 +60,23 @@ class AvailableScheduleController extends Controller
         ];
     }
 
-    private function bookedSlotsPayload(): array
+    private function bookedSlotsPayload(?int $institutionId = null): array
     {
         if (!Schema::hasColumn('meeting_registrations', 'zoom_start_time')) {
             return [];
         }
 
-        return MeetingRegistration::query()
+        $query = MeetingRegistration::query()
             ->whereNotNull('zoom_start_time')
             ->where(function ($q) {
                 $q->whereNull('status')
                     ->orWhereRaw("LOWER(COALESCE(status, 'pending')) = 'approved'")
                     ->orWhereRaw("LOWER(COALESCE(status, 'pending')) = 'pending'");
             })
-            ->orderBy('zoom_start_time')
+            ->orderBy('zoom_start_time');
+        WebinarTenant::scopeRegistrations($query, $institutionId);
+
+        return $query
             ->get([
                 'id',
                 'full_name',
@@ -85,20 +108,22 @@ class AvailableScheduleController extends Controller
             ->all();
     }
 
-    public function index()
+    public function index(Request $request)
     {
         $this->ensureDefaultSchedules();
+        $institutionId = $this->resolveInstitutionId($request);
 
-        $schedules = AvailableSchedule::query()
+        $query = AvailableSchedule::query()
             ->whereNotNull('available_on_date')
             ->orderBy('available_on_date')
-            ->orderBy('start_time')
-            ->get();
+            ->orderBy('start_time');
+        WebinarTenant::scopeSchedules($query, $institutionId);
 
         return response()->json([
-            'schedules' => $schedules,
-            'calendar' => $this->calendarPayload(),
-            'booked_slots' => $this->bookedSlotsPayload(),
+            'schedules' => $query->get(),
+            'calendar' => $this->calendarPayload($institutionId),
+            'booked_slots' => $this->bookedSlotsPayload($institutionId),
+            'platform_institution_id' => $institutionId,
         ], 200);
     }
 
@@ -111,14 +136,15 @@ class AvailableScheduleController extends Controller
             'blocked_dates.*' => 'string|regex:/^\d{4}-\d{2}-\d{2}$/',
         ]);
 
-        $settings = WebinarSetting::current();
+        $institutionId = $this->resolveInstitutionId($request);
+        $settings = WebinarTenant::settingsFor($institutionId);
         $settings->calendar_blocked_months = array_values(array_unique($data['blocked_months'] ?? []));
         $settings->calendar_blocked_dates = array_values(array_unique($data['blocked_dates'] ?? []));
         $settings->save();
 
         return response()->json([
             'message' => 'Meeting calendar availability updated',
-            'calendar' => $this->calendarPayload(),
+            'calendar' => $this->calendarPayload($institutionId),
         ], 200);
     }
 
@@ -141,9 +167,14 @@ class AvailableScheduleController extends Controller
         $data['meeting_duration_minutes'] = (int) ($data['meeting_duration_minutes'] ?? 60);
         $data['is_active'] = array_key_exists('is_active', $data) ? (bool) $data['is_active'] : true;
 
-        $user = $request->user();
+        $user = PlatformInstitutionHelper::resolveActorFromRequest($request) ?: $request->user();
         if ($user) {
             $data['created_by'] = $user->id;
+        }
+
+        $institutionId = WebinarTenant::actorInstitutionId($user instanceof \App\Models\User ? $user : null);
+        if (Schema::hasColumn('available_schedules', 'platform_institution_id')) {
+            $data['platform_institution_id'] = $institutionId;
         }
 
         $slot = AvailableSchedule::create($data);
@@ -171,7 +202,9 @@ class AvailableScheduleController extends Controller
         $duration = (int) ($data['meeting_duration_minutes'] ?? 60);
         $isActive = array_key_exists('is_active', $data) ? (bool) $data['is_active'] : true;
         $notes = $data['notes'] ?? null;
-        $userId = $request->user()?->id;
+        $user = PlatformInstitutionHelper::resolveActorFromRequest($request) ?: $request->user();
+        $userId = $user?->id;
+        $institutionId = WebinarTenant::actorInstitutionId($user instanceof \App\Models\User ? $user : null);
 
         $created = 0;
         $updated = 0;
@@ -187,9 +220,13 @@ class AvailableScheduleController extends Controller
                 'notes' => $notes,
             ]);
 
-            $existing = AvailableSchedule::query()
-                ->where('available_on_date', $date)
-                ->first();
+            if (Schema::hasColumn('available_schedules', 'platform_institution_id')) {
+                $payload['platform_institution_id'] = $institutionId;
+            }
+
+            $existingQuery = AvailableSchedule::query()->where('available_on_date', $date);
+            WebinarTenant::scopeSchedules($existingQuery, $institutionId);
+            $existing = $existingQuery->first();
 
             if ($existing) {
                 $existing->fill($payload);
@@ -235,6 +272,16 @@ class AvailableScheduleController extends Controller
             }
         }
 
+        $actor = PlatformInstitutionHelper::resolveActorFromRequest($request);
+        $actorInstitutionId = WebinarTenant::actorInstitutionId($actor);
+        $scheduleInstitutionId = WebinarTenant::fromSchedule($availableSchedule);
+        if ($actorInstitutionId !== $scheduleInstitutionId && !PlatformInstitutionHelper::isMainPlatformAdmin($actor)) {
+            return response()->json(['message' => 'Not allowed to update this schedule.'], 403);
+        }
+        if (PlatformInstitutionHelper::isMainPlatformAdmin($actor) && $scheduleInstitutionId) {
+            return response()->json(['message' => 'Hub operators manage hub schedules only.'], 403);
+        }
+
         $availableSchedule->fill($data);
         $availableSchedule->save();
 
@@ -244,8 +291,18 @@ class AvailableScheduleController extends Controller
         ], 200);
     }
 
-    public function destroy(AvailableSchedule $availableSchedule)
+    public function destroy(Request $request, AvailableSchedule $availableSchedule)
     {
+        $actor = PlatformInstitutionHelper::resolveActorFromRequest($request);
+        $actorInstitutionId = WebinarTenant::actorInstitutionId($actor);
+        $scheduleInstitutionId = WebinarTenant::fromSchedule($availableSchedule);
+        if ($actorInstitutionId !== $scheduleInstitutionId && !PlatformInstitutionHelper::isMainPlatformAdmin($actor)) {
+            return response()->json(['message' => 'Not allowed to delete this schedule.'], 403);
+        }
+        if (PlatformInstitutionHelper::isMainPlatformAdmin($actor) && $scheduleInstitutionId) {
+            return response()->json(['message' => 'Hub operators manage hub schedules only.'], 403);
+        }
+
         $availableSchedule->delete();
 
         return response()->json([

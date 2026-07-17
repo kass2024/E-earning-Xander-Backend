@@ -7,6 +7,7 @@ use App\Models\MeetingRegistration;
 use App\Models\WebinarSetting;
 use App\Services\Meetings\WebinarDailyService;
 use App\Support\MeetingRegistrationJoinUrl;
+use App\Support\WebinarTenant;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
@@ -118,12 +119,18 @@ class MeetingRegistrationFulfillmentService
             ? Carbon::parse($registration->zoom_start_time)
             : ($schedule ? $this->getNextStartFromSchedule($schedule) : $this->getNextWebinarStartTime());
 
-        $settings = WebinarSetting::current();
+        $institutionId = WebinarTenant::fromRegistration($registration);
+        if (
+            Schema::hasColumn('meeting_registrations', 'platform_institution_id')
+            && empty($registration->platform_institution_id)
+            && $institutionId
+        ) {
+            $registration->platform_institution_id = $institutionId;
+        }
+
+        $settings = WebinarTenant::settingsFor($institutionId);
 
         if ($this->webinarDaily->shouldUseDaily()) {
-            $institutionId = !empty($schedule?->platform_institution_id)
-                ? (int) $schedule->platform_institution_id
-                : ($settings->platform_institution_id ? (int) $settings->platform_institution_id : null);
             $ensured = $this->webinarDaily->ensureRoom($settings, $institutionId);
             if (!$ensured['ok'] && $requireZoom) {
                 return [
@@ -152,7 +159,7 @@ class MeetingRegistrationFulfillmentService
             $registration->save();
 
             if ($sdkJoinUrl) {
-                $this->syncApprovedRegistrationZoomLinks($sdkJoinUrl, $effectiveMeetingId);
+                $this->syncApprovedRegistrationZoomLinks($sdkJoinUrl, $effectiveMeetingId, $institutionId);
             }
 
             return [
@@ -188,6 +195,14 @@ class MeetingRegistrationFulfillmentService
         $registration->save();
 
         $sdkJoinUrl = MeetingRegistrationJoinUrl::forRegistration($registration);
+
+        if ($sdkJoinUrl || $effectiveJoinUrl) {
+            $this->syncApprovedRegistrationZoomLinks(
+                $sdkJoinUrl ?? $effectiveJoinUrl,
+                $effectiveMeetingId ? (string) $effectiveMeetingId : null,
+                $institutionId,
+            );
+        }
 
         return [
             'ok' => (bool) ($zoom['ok'] || $effectiveJoinUrl),
@@ -268,7 +283,7 @@ class MeetingRegistrationFulfillmentService
         return $startAt->copy()->utc()->format('Y-m-d H:i');
     }
 
-    private function syncApprovedRegistrationZoomLinks(?string $joinUrl, ?string $meetingId): void
+    private function syncApprovedRegistrationZoomLinks(?string $joinUrl, ?string $meetingId, ?int $institutionId = null): void
     {
         if (!$joinUrl || !Schema::hasColumn('meeting_registrations', 'zoom_join_url')) {
             return;
@@ -279,9 +294,10 @@ class MeetingRegistrationFulfillmentService
             $update['zoom_meeting_id'] = $meetingId;
         }
 
-        MeetingRegistration::query()
-            ->whereRaw("LOWER(COALESCE(status, 'pending')) = 'approved'")
-            ->update($update);
+        $query = MeetingRegistration::query()
+            ->whereRaw("LOWER(COALESCE(status, 'pending')) = 'approved'");
+        WebinarTenant::scopeRegistrations($query, $institutionId);
+        $query->update($update);
     }
 
     /**
@@ -377,7 +393,7 @@ class MeetingRegistrationFulfillmentService
         }
         $settings->save();
 
-        $this->syncApprovedRegistrationZoomLinks($joinUrl, $meetingId);
+        $this->syncApprovedRegistrationZoomLinks($joinUrl, $meetingId, $institutionId);
 
         return [
             'ok' => true,

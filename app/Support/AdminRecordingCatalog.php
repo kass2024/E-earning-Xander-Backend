@@ -18,10 +18,14 @@ class AdminRecordingCatalog
     {
         $map = [];
 
-        $settings = WebinarSetting::current();
-        if (!empty($settings->zoom_meeting_id)) {
-            $map[(string) $settings->zoom_meeting_id] = 'webinar';
-        }
+        WebinarSetting::query()
+            ->whereNotNull('zoom_meeting_id')
+            ->pluck('zoom_meeting_id')
+            ->each(function ($meetingId) use (&$map) {
+                if ($meetingId) {
+                    $map[(string) $meetingId] = 'webinar';
+                }
+            });
 
         if (Schema::hasTable('meeting_registrations') && Schema::hasColumn('meeting_registrations', 'zoom_meeting_id')) {
             MeetingRegistration::query()

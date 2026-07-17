@@ -169,15 +169,10 @@ class ZoomEmbedController extends Controller
                 ->where('zoom_meeting_id', $dailyRoom)
                 ->first();
             if (!$settings) {
-                $settings = WebinarSetting::forInstitution(
-                    $actorUser instanceof User && !empty($actorUser->platform_institution_id)
-                        ? (int) $actorUser->platform_institution_id
-                        : null
-                );
-                $settings->zoom_meeting_id = $dailyRoom;
-                if (trim((string) ($settings->zoom_join_url ?? '')) === '' || !str_contains(strtolower((string) $settings->zoom_join_url), 'daily.co')) {
-                    $settings->zoom_join_url = app(\App\Services\Meetings\DailyApiService::class)->roomUrl($dailyRoom);
-                }
+                // Do not bind unknown rooms onto hub/actor settings for guests — that corrupts tenant rooms.
+                return response()->json([
+                    'message' => 'This webinar room is not registered. Ask the host to start the session first.',
+                ], 404);
             }
             try {
                 // Never trust client role=1 for Daily owner tokens.
@@ -589,11 +584,23 @@ class ZoomEmbedController extends Controller
      */
     protected function buildWebinarHostAuth(array $data): JsonResponse
     {
-        $actorEmail = trim((string) ($data['user_email'] ?? $data['instructor_email'] ?? ''));
-        $actorEmail = $actorEmail !== '' ? $actorEmail : null;
-        $actorUser = $actorEmail
-            ? User::query()->whereRaw('LOWER(email) = ?', [strtolower(trim($actorEmail))])->first()
-            : request()->user();
+        $request = request();
+        $actorUser = PlatformInstitutionHelper::resolveActorFromRequest($request);
+        $actorEmail = $actorUser?->email
+            ? trim((string) $actorUser->email)
+            : (trim((string) ($data['user_email'] ?? $data['instructor_email'] ?? '')) ?: null);
+
+        if (!$actorUser && $actorEmail) {
+            $actorUser = User::query()->whereRaw('LOWER(email) = ?', [strtolower(trim($actorEmail))])->first();
+        }
+
+        $appRole = strtolower(trim((string) ($actorUser->role ?? '')));
+        $trustedHost = $actorUser && in_array($appRole, ['admin', 'staff', 'instructor', 'partner_company'], true);
+        if (!$trustedHost) {
+            return response()->json([
+                'message' => 'Only an authenticated host can start this webinar session.',
+            ], 403);
+        }
 
         $actorInstitutionId = $actorUser instanceof User && !empty($actorUser->platform_institution_id)
             && !PlatformInstitutionHelper::isMainPlatformAdmin($actorUser)
@@ -855,7 +862,13 @@ class ZoomEmbedController extends Controller
     ): array {
         $meetingDetails = $meetingDetails ?? $this->fetchMeetingDetailsForSdk($meetingId);
 
-        $settings = $webinarSettings ?? WebinarSetting::current();
+        $settings = $webinarSettings;
+        if (!$settings) {
+            $settings = WebinarSetting::query()
+                ->where('zoom_meeting_id', $meetingId)
+                ->first()
+                ?? WebinarSetting::current();
+        }
         if ((string) ($settings->zoom_meeting_id ?? '') === $meetingId) {
             $candidates = $this->zoomService->resolveWebinarJoinPasswordCandidates($settings, $meetingDetails);
         } else {

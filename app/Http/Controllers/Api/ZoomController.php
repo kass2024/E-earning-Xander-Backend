@@ -434,13 +434,28 @@ class ZoomController extends Controller
         }
     }
 
-    public function deleteMeeting(string $id)
+    public function deleteMeeting(Request $request, string $id)
     {
         $adminMeeting = \App\Models\AdminZoomMeeting::query()
             ->where('zoom_meeting_id', $id)
             ->first();
 
+        $actor = \App\Support\PlatformInstitutionHelper::resolveActorFromRequest($request) ?: $request->user();
         if ($adminMeeting) {
+            $meetingInstitutionId = $adminMeeting->platform_institution_id
+                ? (int) $adminMeeting->platform_institution_id
+                : null;
+            $actorInstitutionId = $actor && !\App\Support\PlatformInstitutionHelper::isMainPlatformAdmin($actor)
+                ? ((int) ($actor->platform_institution_id ?? 0) ?: null)
+                : null;
+            $isMain = \App\Support\PlatformInstitutionHelper::isMainPlatformAdmin($actor);
+            if ($isMain && $meetingInstitutionId) {
+                return response()->json(['message' => 'Hub operators can only delete hub meetings.'], 403);
+            }
+            if (!$isMain && $meetingInstitutionId !== $actorInstitutionId) {
+                return response()->json(['message' => 'Not allowed to delete this meeting.'], 403);
+            }
+
             $joinService = app(AdminZoomMeetingJoinService::class);
             if ($joinService->isDailyMeeting($adminMeeting)) {
                 $joinService->deleteDailyRoom($adminMeeting);

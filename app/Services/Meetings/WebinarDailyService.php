@@ -69,10 +69,11 @@ class WebinarDailyService
             return false;
         }
 
-        $settings = WebinarSetting::current();
-        $stored = trim((string) ($settings->zoom_meeting_id ?? ''));
+        $stored = WebinarSetting::query()
+            ->where('zoom_meeting_id', $name)
+            ->first();
 
-        return $stored !== '' && $stored === $name && $this->isDailyWebinar($settings);
+        return $stored !== null && $this->isDailyWebinar($stored);
     }
 
     /**
@@ -140,7 +141,10 @@ class WebinarDailyService
         }
 
         if (!$this->isRoomReusable($roomName)) {
-            $ensured = $this->ensureRoom($settings);
+            $institutionId = $settings->platform_institution_id
+                ? (int) $settings->platform_institution_id
+                : null;
+            $ensured = $this->ensureRoom($settings, $institutionId);
             if (!$ensured['ok']) {
                 throw new \RuntimeException($ensured['message'] ?? 'Daily webinar room expired.');
             }

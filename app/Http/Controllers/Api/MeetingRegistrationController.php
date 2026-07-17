@@ -25,6 +25,8 @@ use App\Support\AdminRecordingCatalog;
 use App\Support\FrontendUrl;
 use App\Support\MeetingJoinUrl;
 use App\Support\MeetingRegistrationJoinUrl;
+use App\Support\PlatformInstitutionHelper;
+use App\Support\WebinarTenant;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
 
@@ -536,16 +538,18 @@ class MeetingRegistrationController extends Controller
         }
     }
 
-    private function approvedRegistrationCount(): int
+    private function approvedRegistrationCount(?int $institutionId = null): int
     {
-        return MeetingRegistration::query()
-            ->whereRaw("LOWER(COALESCE(status, 'pending')) = 'approved'")
-            ->count();
+        $query = MeetingRegistration::query()
+            ->whereRaw("LOWER(COALESCE(status, 'pending')) = 'approved'");
+        WebinarTenant::scopeRegistrations($query, $institutionId);
+
+        return $query->count();
     }
 
-    private function pathwaysJoinUrl(): ?string
+    private function pathwaysJoinUrl(?int $institutionId = null): ?string
     {
-        $settings = WebinarSetting::current();
+        $settings = WebinarTenant::settingsFor($institutionId);
         $meetingId = trim((string) ($settings->zoom_meeting_id ?? ''));
         if ($meetingId !== '') {
             return MeetingRegistrationJoinUrl::participantUrl($meetingId);
@@ -563,7 +567,7 @@ class MeetingRegistrationController extends Controller
             : null;
     }
 
-    private function syncApprovedRegistrationZoomLinks(?string $joinUrl, ?string $meetingId): void
+    private function syncApprovedRegistrationZoomLinks(?string $joinUrl, ?string $meetingId, ?int $institutionId = null): void
     {
         if (!$joinUrl || !Schema::hasColumn('meeting_registrations', 'zoom_join_url')) {
             return;
@@ -574,9 +578,10 @@ class MeetingRegistrationController extends Controller
             $update['zoom_meeting_id'] = $meetingId;
         }
 
-        MeetingRegistration::query()
-            ->whereRaw("LOWER(COALESCE(status, 'pending')) = 'approved'")
-            ->update($update);
+        $query = MeetingRegistration::query()
+            ->whereRaw("LOWER(COALESCE(status, 'pending')) = 'approved'");
+        WebinarTenant::scopeRegistrations($query, $institutionId);
+        $query->update($update);
     }
 
     private function scheduleDurationMinutes(?AvailableSchedule $schedule): int
@@ -717,7 +722,7 @@ class MeetingRegistrationController extends Controller
         $this->applyWebinarMeetingSecrets($settings, $meeting);
         $settings->save();
 
-        $this->syncApprovedRegistrationZoomLinks($joinUrl, $meetingId);
+        $this->syncApprovedRegistrationZoomLinks($joinUrl, $meetingId, $institutionId);
 
         return [
             'ok' => true,
@@ -797,7 +802,7 @@ class MeetingRegistrationController extends Controller
         $this->applyWebinarMeetingSecrets($settings, $meeting);
         $settings->save();
 
-        $this->syncApprovedRegistrationZoomLinks($joinUrl, $meetingId);
+        $this->syncApprovedRegistrationZoomLinks($joinUrl, $meetingId, $institutionId);
 
         return [
             'ok' => true,
@@ -811,9 +816,8 @@ class MeetingRegistrationController extends Controller
         if (Schema::hasColumn('webinar_settings', 'zoom_host_user_id')) {
             $settings->zoom_host_user_id = $hostId;
         }
-        if ($institutionId && Schema::hasColumn('webinar_settings', 'platform_institution_id')) {
-            $settings->platform_institution_id = $institutionId;
-        }
+        // Never reassign platform_institution_id on an existing settings row — that orphans the hub singleton.
+        // Load the correct tenant row with WebinarSetting::forInstitution() before calling this.
     }
 
     /**
@@ -888,10 +892,12 @@ class MeetingRegistrationController extends Controller
         return null;
     }
 
-    public function webinarStatus()
+    public function webinarStatus(Request $request)
     {
-        $settings = WebinarSetting::current();
-        $approvedCount = $this->approvedRegistrationCount();
+        $actor = PlatformInstitutionHelper::resolveActorFromRequest($request);
+        $institutionId = WebinarTenant::actorInstitutionId($actor);
+        $settings = WebinarTenant::settingsFor($institutionId);
+        $approvedCount = $this->approvedRegistrationCount($institutionId);
         $share = $this->webinarSharePayload($settings);
         $isDaily = $this->webinarDaily->isDailyWebinar($settings) || $this->webinarDaily->shouldUseDaily();
 
@@ -911,6 +917,7 @@ class MeetingRegistrationController extends Controller
             'zoom_api_configured' => $this->zoom->isConfigured(),
             'daily_configured' => $this->webinarDaily->shouldUseDaily() || $this->webinarDaily->isDailyWebinar($settings),
             'meeting_provider' => $isDaily ? 'daily' : 'zoom',
+            'platform_institution_id' => $institutionId,
             'session_active' => !empty($settings->zoom_meeting_id) && (
                 $isDaily || !empty($settings->zoom_start_url)
             ),
@@ -979,8 +986,9 @@ class MeetingRegistrationController extends Controller
 
     public function startWebinar(Request $request)
     {
-        $actor = $request->user();
-        $approvedCount = $this->approvedRegistrationCount();
+        $actor = PlatformInstitutionHelper::resolveActorFromRequest($request) ?: $request->user();
+        $institutionId = WebinarTenant::actorInstitutionId($actor instanceof User ? $actor : null);
+        $approvedCount = $this->approvedRegistrationCount($institutionId);
         if ($approvedCount === 0) {
             return response()->json([
                 'message' => 'Cannot start the webinar until at least one participant has registered and been approved.',
@@ -989,12 +997,9 @@ class MeetingRegistrationController extends Controller
             ], 422);
         }
 
-        $settings = WebinarSetting::current();
+        $settings = WebinarTenant::settingsFor($institutionId);
 
         if ($this->webinarDaily->shouldUseDaily()) {
-            $institutionId = $settings->platform_institution_id
-                ? (int) $settings->platform_institution_id
-                : null;
             $ensured = $this->webinarDaily->ensureRoom($settings, $institutionId);
             if (!$ensured['ok']) {
                 return response()->json([
@@ -1016,15 +1021,17 @@ class MeetingRegistrationController extends Controller
                 'zoom_meeting_id' => $settings->zoom_meeting_id,
                 'meeting_provider' => 'daily',
                 'provider' => 'daily',
+                'platform_institution_id' => $institutionId,
             ]);
         }
 
         if (empty($settings->zoom_start_url) || empty($settings->zoom_meeting_id)) {
-            $latest = MeetingRegistration::query()
+            $latestQuery = MeetingRegistration::query()
                 ->with('availableSchedule')
                 ->whereRaw("LOWER(COALESCE(status, 'pending')) = 'approved'")
-                ->orderByDesc('id')
-                ->first();
+                ->orderByDesc('id');
+            WebinarTenant::scopeRegistrations($latestQuery, $institutionId);
+            $latest = $latestQuery->first();
 
             if ($latest) {
                 $schedule = $latest->availableSchedule;
@@ -1032,7 +1039,7 @@ class MeetingRegistrationController extends Controller
                     ? Carbon::parse($latest->zoom_start_time)
                     : ($schedule ? $this->getNextStartFromSchedule($schedule) : $this->getNextWebinarStartTime());
 
-                $ensured = $this->ensureScheduledWebinarMeeting($settings, $startAt, $schedule, $actor);
+                $ensured = $this->ensureScheduledWebinarMeeting($settings, $startAt, $schedule, $actor instanceof User ? $actor : null);
                 if (!$ensured['ok']) {
                     return response()->json([
                         'message' => $ensured['message'] ?? 'Could not prepare the Zoom meeting.',
@@ -1041,7 +1048,7 @@ class MeetingRegistrationController extends Controller
                 }
                 $settings->refresh();
             } else {
-                $created = $this->createWebinarZoomSession($settings, $actor);
+                $created = $this->createWebinarZoomSession($settings, $actor instanceof User ? $actor : null);
                 if (!$created['ok']) {
                     return response()->json([
                         'message' => $created['message'] ?? 'Failed to create Zoom webinar meeting.',
@@ -1071,6 +1078,7 @@ class MeetingRegistrationController extends Controller
             'zoom_meeting_id' => $settings->zoom_meeting_id,
             'meeting_provider' => 'zoom',
             'provider' => 'zoom',
+            'platform_institution_id' => $institutionId,
         ]);
     }
 
@@ -1081,7 +1089,8 @@ class MeetingRegistrationController extends Controller
         ]);
 
         $enabled = (bool) $data['enabled'];
-        $settings = WebinarSetting::current();
+        $institutionId = WebinarTenant::fromRequest($request);
+        $settings = WebinarTenant::settingsFor($institutionId);
         $settings->recording_enabled = $enabled;
         $settings->save();
 
@@ -1120,9 +1129,10 @@ class MeetingRegistrationController extends Controller
         ]);
     }
 
-    public function webinarRecordings()
+    public function webinarRecordings(Request $request)
     {
-        $settings = WebinarSetting::current();
+        $institutionId = WebinarTenant::fromRequest($request);
+        $settings = WebinarTenant::settingsFor($institutionId);
 
         $trackedIds = AdminRecordingCatalog::trackedMeetingIds();
         $collected = $this->zoom->collectAllCloudRecordings($trackedIds, 12);
@@ -1130,20 +1140,13 @@ class MeetingRegistrationController extends Controller
             $this->zoom->formatRecordingItems(['meetings' => $collected['meetings']])
         );
 
-        $webinarMeetingIds = array_keys(array_filter(
-            AdminRecordingCatalog::sourceByMeetingId(),
-            fn (string $source) => $source === 'webinar'
-        ));
-
-        if ($webinarMeetingIds !== []) {
-            $items = array_values(array_filter($items, function ($item) use ($webinarMeetingIds) {
-                return in_array((string) ($item['id'] ?? ''), $webinarMeetingIds, true);
+        $tenantMeetingId = trim((string) ($settings->zoom_meeting_id ?? ''));
+        if ($tenantMeetingId !== '') {
+            $items = array_values(array_filter($items, function ($item) use ($tenantMeetingId) {
+                return (string) ($item['id'] ?? '') === $tenantMeetingId;
             }));
-        } elseif (!empty($settings->zoom_meeting_id)) {
-            $meetingId = (string) $settings->zoom_meeting_id;
-            $items = array_values(array_filter($items, function ($item) use ($meetingId) {
-                return (string) ($item['id'] ?? '') === $meetingId;
-            }));
+        } else {
+            $items = [];
         }
 
         return response()->json(['recordings' => $items]);
@@ -1151,9 +1154,11 @@ class MeetingRegistrationController extends Controller
 
     public function index(Request $request)
     {
+        $institutionId = WebinarTenant::fromRequest($request);
         $query = MeetingRegistration::query()
             ->with('availableSchedule')
             ->orderByDesc('id');
+        WebinarTenant::scopeRegistrations($query, $institutionId);
 
         if ($request->boolean('with_user')) {
             $query->with('user');
@@ -1251,6 +1256,11 @@ class MeetingRegistrationController extends Controller
                 'country' => $learnerTimezone,
                 'notes' => $data['notes'] ?? null,
             ];
+
+            $scheduleInstitutionId = WebinarTenant::fromSchedule($schedule);
+            if (Schema::hasColumn('meeting_registrations', 'platform_institution_id')) {
+                $createRegistration['platform_institution_id'] = $scheduleInstitutionId;
+            }
 
             // Auto-approve on registration; Zoom + confirmation email run after the HTTP response.
             if (Schema::hasColumn('meeting_registrations', 'status')) {

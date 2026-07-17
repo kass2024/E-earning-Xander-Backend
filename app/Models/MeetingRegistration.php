@@ -10,6 +10,7 @@ class MeetingRegistration extends Model
     protected $fillable = [
         'user_id',
         'available_schedule_id',
+        'platform_institution_id',
         'schedule_label',
         'full_name',
         'email',
@@ -30,6 +31,7 @@ class MeetingRegistration extends Model
         'zoom_start_time' => 'datetime',
         'reminder_sent_at' => 'datetime',
         'final_reminder_sent_at' => 'datetime',
+        'platform_institution_id' => 'integer',
     ];
 
     public function user(): BelongsTo

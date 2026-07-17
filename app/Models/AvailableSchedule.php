@@ -19,6 +19,7 @@ class AvailableSchedule extends Model
         'is_active',
         'created_by',
         'notes',
+        'platform_institution_id',
     ];
 
     protected $casts = [
@@ -26,5 +27,6 @@ class AvailableSchedule extends Model
         'day_of_week' => 'integer',
         'meeting_duration_minutes' => 'integer',
         'available_on_date' => 'date:Y-m-d',
+        'platform_institution_id' => 'integer',
     ];
 }

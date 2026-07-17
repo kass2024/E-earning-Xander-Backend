@@ -27,10 +27,14 @@ class LearnerRecordingAccess
             $ids[] = (string) $legacy;
         }
 
-        $settings = WebinarSetting::current();
-        if (!empty($settings->zoom_meeting_id)) {
-            $ids[] = (string) $settings->zoom_meeting_id;
-        }
+        WebinarSetting::query()
+            ->whereNotNull('zoom_meeting_id')
+            ->pluck('zoom_meeting_id')
+            ->each(function ($meetingId) use (&$ids) {
+                if ($meetingId) {
+                    $ids[] = (string) $meetingId;
+                }
+            });
 
         return array_values(array_unique($ids));
     }
