@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Services\Meetings\DailyPermissionPolicy;
 use App\Services\Meetings\MeetingModerationService;
+use App\Support\PlatformInstitutionHelper;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -24,12 +25,12 @@ class MeetingModerationController extends Controller
             'meeting_mode' => 'nullable|string|in:meeting,webinar',
         ]);
 
-        $user = $request->user();
+        $actor = PlatformInstitutionHelper::resolveActorFromRequest($request);
         $result = $this->moderation->raiseHand(
-            $data['meeting_key'],
+            $this->normalizeMeetingKey($data['meeting_key']),
             $data['daily_session_id'],
-            (string) ($data['participant_name'] ?? ($user?->name ?? 'Participant')),
-            $user?->id,
+            (string) ($data['participant_name'] ?? ($actor?->name ?? 'Participant')),
+            $actor?->id,
             (string) ($data['meeting_mode'] ?? DailyPermissionPolicy::MODE_MEETING),
         );
 
@@ -50,10 +51,11 @@ class MeetingModerationController extends Controller
             'daily_session_id' => 'required|string|max:128',
         ]);
 
+        $actor = PlatformInstitutionHelper::resolveActorFromRequest($request);
         $result = $this->moderation->cancelHand(
-            $data['meeting_key'],
+            $this->normalizeMeetingKey($data['meeting_key']),
             $data['daily_session_id'],
-            $request->user()?->id,
+            $actor?->id,
         );
 
         if (!$result['ok']) {
@@ -69,13 +71,14 @@ class MeetingModerationController extends Controller
             'meeting_key' => 'required|string|max:128',
         ]);
 
-        $user = $request->user();
-        if (!$this->moderation->actorCanModerate($user)) {
+        // App auth is email-based (user_email), not Sanctum — resolve actor the same way as Zoom routes.
+        $actor = PlatformInstitutionHelper::resolveActorFromRequest($request);
+        if (!$this->moderation->actorCanModerate($actor)) {
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
 
         return response()->json([
-            'hands' => $this->moderation->pendingHands($data['meeting_key']),
+            'hands' => $this->moderation->pendingHands($this->normalizeMeetingKey($data['meeting_key'])),
         ]);
     }
 
@@ -93,15 +96,15 @@ class MeetingModerationController extends Controller
             'duration_seconds' => 'nullable|integer|min:0|max:7200',
         ]);
 
-        $user = $request->user();
-        if (!$user || !$this->moderation->actorCanModerate($user)) {
+        $actor = PlatformInstitutionHelper::resolveActorFromRequest($request);
+        if (!$actor || !$this->moderation->actorCanModerate($actor)) {
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
 
         $result = $this->moderation->approveSpeaking(
-            $data['meeting_key'],
+            $this->normalizeMeetingKey($data['meeting_key']),
             $data['daily_session_id'],
-            $user,
+            $actor,
             (bool) ($data['audio'] ?? true),
             (bool) ($data['video'] ?? false),
             (bool) ($data['screen_share'] ?? false),
@@ -130,8 +133,8 @@ class MeetingModerationController extends Controller
             'action' => 'nullable|string|in:mute,revoke,stop',
         ]);
 
-        $user = $request->user();
-        if (!$user || !$this->moderation->actorCanModerate($user)) {
+        $actor = PlatformInstitutionHelper::resolveActorFromRequest($request);
+        if (!$actor || !$this->moderation->actorCanModerate($actor)) {
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
 
@@ -141,9 +144,9 @@ class MeetingModerationController extends Controller
         }
 
         $result = $this->moderation->revokeSpeaking(
-            $data['meeting_key'],
+            $this->normalizeMeetingKey($data['meeting_key']),
             $data['daily_session_id'],
-            $user,
+            $actor,
             $action,
         );
 
@@ -167,12 +170,16 @@ class MeetingModerationController extends Controller
             'hand_raise_id' => 'required|integer',
         ]);
 
-        $user = $request->user();
-        if (!$user || !$this->moderation->actorCanModerate($user)) {
+        $actor = PlatformInstitutionHelper::resolveActorFromRequest($request);
+        if (!$actor || !$this->moderation->actorCanModerate($actor)) {
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
 
-        $result = $this->moderation->denyHand($data['meeting_key'], (int) $data['hand_raise_id'], $user);
+        $result = $this->moderation->denyHand(
+            $this->normalizeMeetingKey($data['meeting_key']),
+            (int) $data['hand_raise_id'],
+            $actor,
+        );
         if (!$result['ok']) {
             return response()->json(['message' => $result['message'] ?? 'Unable to deny.'], 422);
         }
@@ -187,15 +194,44 @@ class MeetingModerationController extends Controller
             'daily_session_id' => 'required|string|max:128',
         ]);
 
-        $this->moderation->clearSession($data['meeting_key'], $data['daily_session_id']);
+        $actor = PlatformInstitutionHelper::resolveActorFromRequest($request);
+        $meetingKey = $this->normalizeMeetingKey($data['meeting_key']);
+        $this->moderation->clearSession($meetingKey, $data['daily_session_id']);
         $this->moderation->audit(
-            $data['meeting_key'],
-            $request->user()?->id,
-            $request->user()?->id,
+            $meetingKey,
+            $actor?->id,
+            $actor?->id,
             $data['daily_session_id'],
             'participant_left',
         );
 
         return response()->json(['ok' => true]);
+    }
+
+    /**
+     * Prefer Daily room name over full join URL so host/guest share one meeting_key.
+     */
+    protected function normalizeMeetingKey(string $key): string
+    {
+        $key = trim($key);
+        if ($key === '') {
+            return $key;
+        }
+
+        if (preg_match('#daily\.co/([^/?#]+)#i', $key, $m)) {
+            return rawurldecode($m[1]);
+        }
+
+        if (str_contains($key, '/') || str_contains($key, '?')) {
+            $path = parse_url($key, PHP_URL_PATH);
+            if (is_string($path) && $path !== '') {
+                $base = trim(basename($path));
+                if ($base !== '') {
+                    return $base;
+                }
+            }
+        }
+
+        return $key;
     }
 }

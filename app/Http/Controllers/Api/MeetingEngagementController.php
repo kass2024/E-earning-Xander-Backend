@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Services\Meetings\MeetingEngagementService;
 use Illuminate\Http\JsonResponse;
+use App\Support\PlatformInstitutionHelper;
 use Illuminate\Http\Request;
 
 class MeetingEngagementController extends Controller
@@ -32,7 +33,7 @@ class MeetingEngagementController extends Controller
             'is_anonymous' => 'nullable|boolean',
         ]);
 
-        $user = $request->user();
+        $user = PlatformInstitutionHelper::resolveActorFromRequest($request);
         $result = $this->engagement->askQuestion(
             $data['meeting_key'],
             $data['question'],
@@ -73,7 +74,7 @@ class MeetingEngagementController extends Controller
             'status' => 'nullable|string|in:open,answered,dismissed,pinned',
         ]);
 
-        $user = $request->user();
+        $user = PlatformInstitutionHelper::resolveActorFromRequest($request);
         if (!$user || !$this->engagement->actorCanModerate($user)) {
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
@@ -104,7 +105,7 @@ class MeetingEngagementController extends Controller
     public function listPolls(Request $request): JsonResponse
     {
         $data = $request->validate(['meeting_key' => 'required|string|max:128']);
-        $user = $request->user();
+        $user = PlatformInstitutionHelper::resolveActorFromRequest($request);
         $includeDrafts = $user && $this->engagement->actorCanModerate($user);
 
         return response()->json([
@@ -123,7 +124,7 @@ class MeetingEngagementController extends Controller
             'open_now' => 'nullable|boolean',
         ]);
 
-        $user = $request->user();
+        $user = PlatformInstitutionHelper::resolveActorFromRequest($request);
         if (!$user) {
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
@@ -150,7 +151,7 @@ class MeetingEngagementController extends Controller
             'meeting_key' => 'required|string|max:128',
             'poll_id' => 'required|integer',
         ]);
-        $user = $request->user();
+        $user = PlatformInstitutionHelper::resolveActorFromRequest($request);
         if (!$user) {
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
@@ -169,7 +170,7 @@ class MeetingEngagementController extends Controller
             'meeting_key' => 'required|string|max:128',
             'poll_id' => 'required|integer',
         ]);
-        $user = $request->user();
+        $user = PlatformInstitutionHelper::resolveActorFromRequest($request);
         if (!$user) {
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
@@ -196,7 +197,7 @@ class MeetingEngagementController extends Controller
             $data['meeting_key'],
             (int) $data['poll_id'],
             $data['option_indexes'],
-            $request->user()?->id,
+            PlatformInstitutionHelper::resolveActorFromRequest($request)?->id,
             $data['daily_session_id'] ?? null,
         );
 
@@ -225,7 +226,7 @@ class MeetingEngagementController extends Controller
             'count' => 'nullable|integer|min:1|max:12',
         ]);
 
-        $user = $request->user();
+        $user = PlatformInstitutionHelper::resolveActorFromRequest($request);
         if (!$user) {
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
@@ -254,7 +255,7 @@ class MeetingEngagementController extends Controller
             'session_ids.*' => 'string|max:128',
         ]);
 
-        $user = $request->user();
+        $user = PlatformInstitutionHelper::resolveActorFromRequest($request);
         if (!$user) {
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
@@ -276,7 +277,7 @@ class MeetingEngagementController extends Controller
     public function openBreakouts(Request $request): JsonResponse
     {
         $data = $request->validate(['meeting_key' => 'required|string|max:128']);
-        $user = $request->user();
+        $user = PlatformInstitutionHelper::resolveActorFromRequest($request);
         if (!$user) {
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
@@ -292,7 +293,7 @@ class MeetingEngagementController extends Controller
     public function closeBreakouts(Request $request): JsonResponse
     {
         $data = $request->validate(['meeting_key' => 'required|string|max:128']);
-        $user = $request->user();
+        $user = PlatformInstitutionHelper::resolveActorFromRequest($request);
         if (!$user) {
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
@@ -326,7 +327,7 @@ class MeetingEngagementController extends Controller
             'members.*.spotlighted' => 'nullable|boolean',
         ]);
 
-        $user = $request->user();
+        $user = PlatformInstitutionHelper::resolveActorFromRequest($request);
         if (!$user) {
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
@@ -361,7 +362,7 @@ class MeetingEngagementController extends Controller
             'meeting_key' => 'nullable|string|max:128',
         ]);
 
-        $user = $request->user();
+        $user = PlatformInstitutionHelper::resolveActorFromRequest($request);
         if (!$user || !$this->engagement->actorCanModerate($user)) {
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
