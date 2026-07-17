@@ -35,12 +35,9 @@ class MeetingProviderManager
         return $this->forProvider(CourseMaterialHelper::meetingProvider($material, $institution));
     }
 
-    public function institutionProvider(?PlatformInstitution $institution): MeetingProvider
+    public function institutionProvider(?PlatformInstitution $institution = null): MeetingProvider
     {
-        if ($institution) {
-            return MeetingProvider::fromStringOrDefault($institution->meeting_provider);
-        }
-
+        // Full-admin main setting applies everywhere, including partner institutions.
         return app(PlatformSettingsService::class)->mainPlatformMeetingProvider();
     }
 

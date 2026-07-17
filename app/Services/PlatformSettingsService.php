@@ -30,6 +30,14 @@ class PlatformSettingsService
         }
 
         $this->set('main_platform_meeting_provider', $provider->value);
+
+        // Keep partner institution rows in sync so legacy readers stay consistent.
+        if (Schema::hasTable('platform_institutions') && Schema::hasColumn('platform_institutions', 'meeting_provider')) {
+            \Illuminate\Support\Facades\DB::table('platform_institutions')->update([
+                'meeting_provider' => $provider->value,
+                'updated_at' => now(),
+            ]);
+        }
     }
 
     public function isReady(): bool

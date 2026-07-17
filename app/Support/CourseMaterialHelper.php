@@ -29,7 +29,8 @@ class CourseMaterialHelper
 
 
 
-        if ($type === 'zoom') {
+        // Daily and Zoom live sessions share the same "live class" kind for UI/API.
+        if (in_array($type, ['zoom', 'daily'], true)) {
 
             return 'zoom';
 
@@ -149,11 +150,7 @@ class CourseMaterialHelper
             return MeetingProvider::Zoom;
         }
 
-        // New meeting: institution or main platform default (Daily).
-        if ($institution) {
-            return MeetingProvider::fromStringOrDefault($institution->meeting_provider);
-        }
-
+        // New meeting: always use the main admin platform setting (partners inherit it).
         return app(\App\Services\PlatformSettingsService::class)->mainPlatformMeetingProvider();
     }
 
@@ -169,6 +166,29 @@ class CourseMaterialHelper
     public static function isDailyMeeting(CourseMaterial $material): bool
     {
         return self::meetingProvider($material) === MeetingProvider::Daily;
+    }
+
+    /**
+     * True when this course material row is a scheduled live class (Zoom or Daily).
+     * Live classes are course-scoped sessions — type may be "zoom" or "daily".
+     */
+    public static function isLiveClassSession(CourseMaterial $material): bool
+    {
+        $type = strtolower((string) ($material->type ?? ''));
+        if (in_array($type, ['zoom', 'daily'], true)) {
+            return true;
+        }
+
+        // Legacy rows: wrong/missing type but clearly a meeting for this course.
+        $meta = is_array($material->metadata) ? $material->metadata : [];
+        $storedProvider = strtolower(trim((string) ($meta['meeting_provider'] ?? '')));
+        if (in_array($storedProvider, ['zoom', 'daily'], true) && self::hasExistingMeeting($material)) {
+            return true;
+        }
+
+        return !empty($meta['daily_room_name'])
+            || !empty($meta['daily_room_url'])
+            || (is_string($meta['join_url'] ?? null) && str_contains((string) $meta['join_url'], '.daily.co/'));
     }
 
     public static function externalMeetingReference(CourseMaterial $material): ?string
@@ -199,7 +219,9 @@ class CourseMaterialHelper
 
     public static function embedRoomPath(CourseMaterial $material, int $role = 0, ?int $studentId = null): ?string
     {
-        if (!self::meetingId($material)) {
+        // Allow opening the room when the live-class material exists for a course
+        // (Daily may use daily_room_name; Zoom uses meeting_id).
+        if (!self::isLiveClassSession($material) && !self::hasExistingMeeting($material)) {
             return null;
         }
 

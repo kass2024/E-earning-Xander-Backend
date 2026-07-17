@@ -171,7 +171,7 @@ class PlatformMeetingSettingsController extends Controller
 
         if (!empty($user->platform_institution_id)) {
 
-            return 'Partner institution accounts cannot change the main platform setting. Use Partner Institutions → Manage to set the meeting platform for that institution.';
+            return 'Partner institution accounts cannot change the live meeting provider. Ask a main platform admin to update Settings → Live meetings.';
 
         }
 

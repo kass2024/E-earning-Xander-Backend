@@ -151,8 +151,9 @@ class PlatformInstitution extends Model
             'mail_from_name' => $this->mail_from_name,
             'portal' => $this->portalContentPayload(),
             'zoom_host_user_id' => $this->zoom_host_user_id,
-            'meeting_provider' => $this->meeting_provider
-                ?? app(\App\Services\PlatformSettingsService::class)->mainPlatformMeetingProvider()->value,
+            'meeting_provider' => app(\App\Services\PlatformSettingsService::class)
+                ->mainPlatformMeetingProvider()
+                ->value,
         ];
     }
 

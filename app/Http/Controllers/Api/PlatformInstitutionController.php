@@ -337,18 +337,13 @@ class PlatformInstitutionController extends Controller
         }
 
         if (array_key_exists('meeting_provider', $data)) {
-            $provider = MeetingProvider::fromStringOrDefault($data['meeting_provider']);
-            if (!(bool) config('services.daily.integration_enabled', false) && $provider === MeetingProvider::Daily) {
-                return response()->json([
-                    'message' => 'Daily integration is disabled. Set DAILY_INTEGRATION_ENABLED=true and configure Daily credentials.',
-                ], 422);
-            }
-            try {
-                $this->meetingProviders->assertSelectable($provider);
-            } catch (\InvalidArgumentException $e) {
-                return response()->json(['message' => $e->getMessage()], 422);
-            }
-            $data['meeting_provider'] = $provider->value;
+            // Partners inherit the main admin setting; ignore per-institution overrides.
+            unset($data['meeting_provider']);
+        }
+        if (Schema::hasColumn('platform_institutions', 'meeting_provider')) {
+            $data['meeting_provider'] = app(\App\Services\PlatformSettingsService::class)
+                ->mainPlatformMeetingProvider()
+                ->value;
         }
 
         $platformInstitution->fill($data);
@@ -427,18 +422,13 @@ class PlatformInstitutionController extends Controller
         }
 
         if (array_key_exists('meeting_provider', $data)) {
-            $provider = MeetingProvider::fromStringOrDefault($data['meeting_provider']);
-            if (!(bool) config('daily.enabled', false) && $provider === MeetingProvider::Daily) {
-                return response()->json([
-                    'message' => 'Daily integration is disabled. Set DAILY_INTEGRATION_ENABLED=true and configure Daily credentials.',
-                ], 422);
-            }
-            try {
-                $this->meetingProviders->assertSelectable($provider);
-            } catch (\InvalidArgumentException $e) {
-                return response()->json(['message' => $e->getMessage()], 422);
-            }
-            $institution->meeting_provider = $provider->value;
+            // Partners inherit Settings → Live meetings from the main admin.
+            unset($data['meeting_provider']);
+        }
+        if (Schema::hasColumn('platform_institutions', 'meeting_provider')) {
+            $institution->meeting_provider = app(\App\Services\PlatformSettingsService::class)
+                ->mainPlatformMeetingProvider()
+                ->value;
         }
 
         foreach ([
