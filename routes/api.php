@@ -121,6 +121,7 @@ Route::prefix('admin')->group(function () {
     Route::get('livezoom-cohort/{liveZoomCohort}/queue', [LiveZoomCohortController::class, 'adminQueue']);
     Route::get('livezoom-cohort/{liveZoomCohort}/attendance', [LiveZoomCohortController::class, 'attendance']);
     Route::post('livezoom-cohort/{liveZoomCohort}/queue/release', [LiveZoomCohortController::class, 'releaseCurrent']);
+    Route::post('livezoom-cohort/{liveZoomCohort}/queue/release/{queueEntry}', [LiveZoomCohortController::class, 'releaseEntry']);
     Route::post('livezoom-cohort/{liveZoomCohort}/queue/admit-next', [LiveZoomCohortController::class, 'admitNextWaiting']);
     Route::post('livezoom-cohort/{liveZoomCohort}/queue/admit-all', [LiveZoomCohortController::class, 'admitAllWaiting']);
     Route::post('livezoom-cohort/{liveZoomCohort}/queue/admit/{queueEntry}', [LiveZoomCohortController::class, 'admitWaitingEntry']);

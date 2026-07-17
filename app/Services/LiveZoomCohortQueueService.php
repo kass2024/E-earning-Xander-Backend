@@ -335,6 +335,47 @@ class LiveZoomCohortQueueService
     }
 
     /**
+     * Remove a specific admitted / in-meeting participant from the session queue
+     * without auto-admitting the next waiter (host controls admits separately).
+     *
+     * @return array<string, mixed>
+     */
+    public function releaseEntry(LiveZoomCohort $cohort, int $entryId): array
+    {
+        $this->assertQueueEnabled();
+
+        return DB::transaction(function () use ($cohort, $entryId) {
+            $entry = LiveZoomCohortQueueEntry::query()
+                ->where('livezoom_cohort_id', $cohort->id)
+                ->where('id', $entryId)
+                ->whereIn('status', ['admitted', 'in_meeting', 'waiting'])
+                ->lockForUpdate()
+                ->first();
+
+            if (!$entry) {
+                throw new \RuntimeException('That participant is no longer in the session or queue.');
+            }
+
+            $wasWaiting = $entry->status === 'waiting';
+            $entry->status = $wasWaiting ? 'cancelled' : 'left';
+            $entry->released_at = now();
+            $entry->save();
+
+            if ($wasWaiting) {
+                $this->recalculateWaitingPositions($cohort);
+            } else {
+                $this->refreshCurrentQueuePointer($cohort);
+            }
+
+            return [
+                'message' => $entry->display_name . ' was removed.',
+                'released' => $this->entryPayload($cohort, $entry->fresh()),
+                'session' => $this->sessionPayload($cohort->fresh()),
+            ];
+        });
+    }
+
+    /**
      * @return array<string, mixed>|null
      */
     public function releaseCurrent(LiveZoomCohort $cohort): ?array

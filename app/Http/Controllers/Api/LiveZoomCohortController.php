@@ -353,6 +353,25 @@ class LiveZoomCohortController extends Controller
                     ? 'Previous participant released. Next person admitted.'
                     : 'Previous participant released.',
                 ...$result,
+                'queue' => $this->queueService->adminQueue($liveZoomCohort->fresh()),
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+    }
+
+    public function releaseEntry(LiveZoomCohort $liveZoomCohort, LiveZoomCohortQueueEntry $queueEntry)
+    {
+        try {
+            if ((int) $queueEntry->livezoom_cohort_id !== (int) $liveZoomCohort->id) {
+                return response()->json(['message' => 'Queue entry does not belong to this cohort.'], 404);
+            }
+
+            $result = $this->queueService->releaseEntry($liveZoomCohort, (int) $queueEntry->id);
+
+            return response()->json([
+                ...$result,
+                'queue' => $this->queueService->adminQueue($liveZoomCohort->fresh()),
             ]);
         } catch (\Throwable $e) {
             return response()->json(['message' => $e->getMessage()], 422);
