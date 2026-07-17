@@ -17,10 +17,12 @@ use App\Support\CourseMaterialHelper;
 use App\Support\EnrollmentStatusHelper;
 use App\Support\FrontendUrl;
 use App\Support\PlatformInstitutionHelper;
+use App\Support\PlatformTenantScope;
 use App\Support\ZoomMeetingBrandingResolver;
 use App\Models\PlatformInstitution;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 
 class ZoomEmbedController extends Controller
@@ -114,11 +116,18 @@ class ZoomEmbedController extends Controller
                 }
             }
             try {
+                // Never trust client role=1 for Daily owner tokens.
+                $sanctumUser = $request->user();
+                $trustedOwner = false;
+                if ($sanctumUser) {
+                    $appRole = strtolower((string) ($sanctumUser->role ?? ''));
+                    $trustedOwner = in_array($appRole, ['admin', 'staff', 'instructor', 'partner_company'], true);
+                }
                 $dailySdk = $this->webinarDaily->buildSdkPayload(
                     $settings,
                     $userName,
                     $actorEmail ?: ('guest-' . substr(md5($userName . microtime(true)), 0, 10)),
-                    $role === 1,
+                    $trustedOwner,
                 );
             } catch (\Throwable $e) {
                 return response()->json(['message' => $e->getMessage()], 422);
@@ -129,7 +138,7 @@ class ZoomEmbedController extends Controller
                 $platformInstitutionId,
                 $this->hostBrandingAllowsActorInstitutionFallback($actorUser, $data),
             );
-            if ($role === 1) {
+            if ($trustedOwner) {
                 $zoomHost = $this->zoomService->resolveConfiguredHostBranding(
                     $platformInstitutionId,
                     $actorUser?->id ? (int) $actorUser->id : null,
@@ -247,8 +256,12 @@ class ZoomEmbedController extends Controller
     {
         $material->loadMissing('course');
 
-        if (strtolower((string) $material->type) !== 'zoom') {
+        if (!CourseMaterialHelper::isLiveClassSession($material)) {
             return response()->json(['message' => 'This material is not a live class.'], 422);
+        }
+
+        if (!$material->course) {
+            return response()->json(['message' => 'This live class has no course assigned.'], 422);
         }
 
         $isDaily = CourseMaterialHelper::isDailyMeeting($material);
@@ -359,24 +372,32 @@ class ZoomEmbedController extends Controller
 
             $branding = [];
             if ($role === 1) {
-                $zoomHost = $this->zoomService->resolveConfiguredHostBranding(
-                    $platformInstitutionId,
-                    $actorUser?->id ? (int) $actorUser->id : null,
-                    $actorEmail,
-                );
-                $branding = $this->meetingBrandingPayload(
-                    $actorEmail,
-                    $platformInstitutionId,
-                    $this->hostBrandingAllowsActorInstitutionFallback($actorUser, $data),
-                );
-                $branding = $this->brandingResolver->finalizeHostSdkBranding(
-                    $branding,
-                    $zoomHost,
-                    $actorUser,
-                );
-                $userName = $this->hostOrgDisplayName($branding);
-                if (!empty($branding['host']['avatar_url'])) {
-                    $participantAvatar = $branding['host']['avatar_url'];
+                try {
+                    $zoomHost = $this->zoomService->resolveConfiguredHostBranding(
+                        $platformInstitutionId,
+                        $actorUser?->id ? (int) $actorUser->id : null,
+                        $actorEmail,
+                    );
+                    $branding = $this->meetingBrandingPayload(
+                        $actorEmail,
+                        $platformInstitutionId,
+                        $this->hostBrandingAllowsActorInstitutionFallback($actorUser, $data),
+                    );
+                    $branding = $this->brandingResolver->finalizeHostSdkBranding(
+                        $branding,
+                        $zoomHost,
+                        $actorUser,
+                    );
+                    $userName = $this->hostOrgDisplayName($branding);
+                    if (!empty($branding['host']['avatar_url'])) {
+                        $participantAvatar = $branding['host']['avatar_url'];
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning('Daily host branding failed; continuing with basic host name', [
+                        'material_id' => $material->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                    $userName = trim((string) ($instructor->name ?? $userName ?? 'Instructor')) ?: 'Instructor';
                 }
             }
 

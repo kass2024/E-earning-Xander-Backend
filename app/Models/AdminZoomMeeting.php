@@ -18,6 +18,11 @@ class AdminZoomMeeting extends Model
         'agenda',
         'created_by_user_id',
         'meta',
+        'meeting_provider',
+        'meeting_mode',
+        'daily_room_name',
+        'daily_room_url',
+        'session_status',
     ];
 
     protected $casts = [
@@ -45,6 +50,10 @@ class AdminZoomMeeting extends Model
             'join_url' => $this->join_url,
             'password' => $this->password,
             'agenda' => $this->agenda,
+            'provider' => $this->meeting_provider ?: ($this->meta['meeting_provider'] ?? null),
+            'meeting_mode' => $this->meeting_mode ?: ($this->meta['meeting_mode'] ?? $this->meta['type'] ?? null),
+            'daily_room_name' => $this->daily_room_name,
+            'session_status' => $this->session_status,
         ], static fn ($value) => $value !== null && $value !== '');
     }
 }

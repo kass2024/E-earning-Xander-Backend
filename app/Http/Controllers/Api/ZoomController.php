@@ -3,7 +3,11 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Enums\MeetingProvider;
 use App\Services\MailDeliveryService;
+use App\Services\Meetings\DailyApiService;
+use App\Services\Meetings\DailyPermissionPolicy;
+use App\Services\PlatformSettingsService;
 use App\Services\ZoomHostAssignmentService;
 use App\Services\Meetings\MeetingProviderStatusService;
 use App\Services\ZoomService;
@@ -12,6 +16,7 @@ use App\Support\AdminZoomMeetingRegistry;
 use App\Support\FrontendUrl;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class ZoomController extends Controller
 {
@@ -240,6 +245,77 @@ class ZoomController extends Controller
         );
 
         $isWebinar = strtolower((string) ($payload['type'] ?? 'meeting')) === 'webinar';
+        $meetingMode = $isWebinar
+            ? DailyPermissionPolicy::MODE_WEBINAR
+            : DailyPermissionPolicy::MODE_MEETING;
+
+        /** Prefer Daily when the main platform provider is Daily and Daily is configured. */
+        $platformProvider = app(PlatformSettingsService::class)->mainPlatformMeetingProvider();
+        $daily = app(DailyApiService::class);
+        if ($platformProvider === MeetingProvider::Daily && $daily->isConfigured()) {
+            try {
+                $daily->ensureDomainDefaults();
+                $roomName = ($isWebinar ? 'admin-webinar-' : 'admin-meet-')
+                    . ($institutionId && $institutionId > 0 ? $institutionId : 'main')
+                    . '-' . Str::lower(Str::random(8));
+                $startAt = !empty($payload['start_time'])
+                    ? \Carbon\Carbon::parse((string) $payload['start_time'])
+                    : now();
+                $duration = (int) ($payload['duration'] ?? 30);
+                $grace = (int) config('daily.room_grace_minutes', 30);
+                $room = $daily->createRoom($roomName, $daily->classroomRoomProperties([
+                    'exp' => $startAt->copy()->addMinutes($duration + $grace)->timestamp,
+                    'start_audio_off' => (bool) ($payload['mute_upon_entry'] ?? true),
+                    'start_video_off' => true,
+                ]));
+                $resolvedName = (string) ($room['name'] ?? $roomName);
+                $roomUrl = (string) ($room['url'] ?? $daily->roomUrl($resolvedName));
+
+                $data = [
+                    'id' => $resolvedName,
+                    'uuid' => $resolvedName,
+                    'topic' => (string) ($payload['topic'] ?? 'Meeting'),
+                    'start_time' => $startAt->toIso8601String(),
+                    'duration' => $duration,
+                    'join_url' => $roomUrl,
+                    'start_url' => $roomUrl,
+                    'password' => null,
+                    'agenda' => $payload['agenda'] ?? null,
+                    'provider' => 'daily',
+                    'meeting_mode' => $meetingMode,
+                    'session_status' => 'upcoming',
+                ];
+
+                AdminZoomMeetingRegistry::register($data, $user?->id, array_merge($payload, [
+                    'type' => $meetingMode,
+                    'meeting_provider' => 'daily',
+                    'meeting_mode' => $meetingMode,
+                    'daily_room_name' => $resolvedName,
+                    'daily_room_url' => $roomUrl,
+                ]));
+
+                if (!empty($payload['invite_emails'])) {
+                    $this->sendInviteEmails($payload, $data, $user);
+                }
+
+                return response()->json([
+                    'provider' => 'daily',
+                    'meeting_mode' => $meetingMode,
+                    'zoom' => $data,
+                    'host_name' => $user->name ?? null,
+                    'host_email' => $user->email ?? null,
+                    'start_url' => $roomUrl,
+                    'join_url' => $roomUrl,
+                ], 201);
+            } catch (\Throwable $e) {
+                Log::error('Daily admin meeting create failed', ['error' => $e->getMessage()]);
+
+                return response()->json([
+                    'message' => 'Unable to create Daily meeting: ' . $e->getMessage(),
+                ], 500);
+            }
+        }
+
         $data = $isWebinar
             ? $this->zoom->createWebinar($payload, $hostId)
             : $this->zoom->createMeeting($payload, $hostId);
@@ -259,49 +335,18 @@ class ZoomController extends Controller
 
         // Optionally send invite emails to staff/users
         if (!empty($payload['invite_emails'])) {
-            $rawList = $payload['invite_emails'];
-            $emails = array_filter(array_map('trim', explode(',', $rawList)));
-
-            if (!empty($emails)) {
-                $subject = 'Zoom meeting invitation: ' . ($data['topic'] ?? $payload['topic'] ?? 'Meeting');
-                $joinUrl = $data['join_url'] ?? null;
-                $password = $data['password'] ?? ($payload['password'] ?? null);
-                $startTime = $data['start_time'] ?? ($payload['start_time'] ?? null);
-
-                $lines = [];
-                $lines[] = $subject;
-                if ($startTime) {
-                    $lines[] = 'Time: ' . $startTime;
-                }
-                if ($joinUrl) {
-                    $lines[] = 'Join link: ' . $joinUrl;
-                }
-                if ($password) {
-                    $lines[] = 'Password: ' . $password;
-                }
-                $lines[] = '';
-                $lines[] = 'Sent from ' . config('app.name') . ' system.';
-
-                $bodyText = implode("\n", $lines);
-
-                foreach ($emails as $email) {
-                    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                        continue;
-                    }
-                    $this->mail->sendRaw($bodyText, function ($message) use ($email, $subject) {
-                        $message->to($email)->subject($subject);
-                    }, [
-                        'event' => 'zoom_invite',
-                        'email' => $email,
-                    ]);
-                }
-            }
+            $this->sendInviteEmails($payload, $data, $user);
         }
 
-        AdminZoomMeetingRegistry::register($data, $user?->id, $payload);
+        AdminZoomMeetingRegistry::register($data, $user?->id, array_merge($payload, [
+            'meeting_provider' => 'zoom',
+            'meeting_mode' => $meetingMode,
+        ]));
 
         // Include host details and explicit links in the response
         $responseBody = [
+            'provider' => 'zoom',
+            'meeting_mode' => $meetingMode,
             'zoom' => $data,
             'host_name' => $user->name ?? null,
             'host_email' => $user->email ?? null,
@@ -310,6 +355,50 @@ class ZoomController extends Controller
         ];
 
         return response()->json($responseBody, 201);
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @param  array<string, mixed>  $data
+     */
+    protected function sendInviteEmails(array $payload, array $data, $user): void
+    {
+        $rawList = $payload['invite_emails'] ?? '';
+        $emails = array_filter(array_map('trim', explode(',', (string) $rawList)));
+        if (empty($emails)) {
+            return;
+        }
+
+        $subject = 'Meeting invitation: ' . ($data['topic'] ?? $payload['topic'] ?? 'Meeting');
+        $joinUrl = $data['join_url'] ?? null;
+        $password = $data['password'] ?? ($payload['password'] ?? null);
+        $startTime = $data['start_time'] ?? ($payload['start_time'] ?? null);
+
+        $lines = [$subject];
+        if ($startTime) {
+            $lines[] = 'Time: ' . $startTime;
+        }
+        if ($joinUrl) {
+            $lines[] = 'Join link: ' . $joinUrl;
+        }
+        if ($password) {
+            $lines[] = 'Password: ' . $password;
+        }
+        $lines[] = '';
+        $lines[] = 'Sent from ' . config('app.name') . ' system.';
+        $bodyText = implode("\n", $lines);
+
+        foreach ($emails as $email) {
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                continue;
+            }
+            $this->mail->sendRaw($bodyText, function ($message) use ($email, $subject) {
+                $message->to($email)->subject($subject);
+            }, [
+                'event' => 'zoom_invite',
+                'email' => $email,
+            ]);
+        }
     }
 
     public function deleteMeeting(string $id)

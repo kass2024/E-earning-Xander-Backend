@@ -4,6 +4,9 @@ namespace App\Data\Meetings;
 
 class MeetingJoinRequest
 {
+    /**
+     * @param  array<string, mixed>  $context  Optional: meeting_role, meeting_mode
+     */
     public function __construct(
         public readonly string $externalMeetingId,
         public readonly string $roomUrl,

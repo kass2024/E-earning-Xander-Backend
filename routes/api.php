@@ -367,6 +367,15 @@ Route::prefix('admin')->group(function () {
     Route::get('zoom/webinars', [ZoomController::class, 'listWebinars']);
     Route::post('zoom/webinars', [ZoomController::class, 'createWebinar']);
 
+    /*** ---------------- MEETING MODERATION (Daily) ---------------- ***/
+    Route::post('meetings/moderation/raise-hand', [\App\Http\Controllers\Api\MeetingModerationController::class, 'raiseHand']);
+    Route::post('meetings/moderation/cancel-hand', [\App\Http\Controllers\Api\MeetingModerationController::class, 'cancelHand']);
+    Route::get('meetings/moderation/hands', [\App\Http\Controllers\Api\MeetingModerationController::class, 'pendingHands']);
+    Route::post('meetings/moderation/approve-speaking', [\App\Http\Controllers\Api\MeetingModerationController::class, 'approveSpeaking']);
+    Route::post('meetings/moderation/revoke-speaking', [\App\Http\Controllers\Api\MeetingModerationController::class, 'revokeSpeaking']);
+    Route::post('meetings/moderation/deny-hand', [\App\Http\Controllers\Api\MeetingModerationController::class, 'denyHand']);
+    Route::post('meetings/moderation/leave', [\App\Http\Controllers\Api\MeetingModerationController::class, 'leaveSession']);
+
     // Temporary: test if Zoom OAuth token can be obtained
     Route::get('zoom/test-token', function (ZoomService $zoom) {
         $ref = new \ReflectionClass($zoom);

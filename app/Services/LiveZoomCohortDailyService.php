@@ -187,6 +187,12 @@ class LiveZoomCohortDailyService
                 ? (int) $cohort->platform_institution_id
                 : null,
             expiresAt: now()->addHours(4),
+            context: [
+                'meeting_role' => $isOwner
+                    ? \App\Services\Meetings\DailyPermissionPolicy::ROLE_HOST
+                    : \App\Services\Meetings\DailyPermissionPolicy::ROLE_ATTENDEE,
+                'meeting_mode' => \App\Services\Meetings\DailyPermissionPolicy::MODE_MEETING,
+            ],
         ));
 
         return [
@@ -195,7 +201,10 @@ class LiveZoomCohortDailyService
             'token' => $join->token,
             'room_name' => $roomName,
             'role' => $isOwner ? 1 : 0,
+            'meeting_role' => $join->metadata['meeting_role'] ?? ($isOwner ? 'host' : 'attendee'),
+            'meeting_mode' => 'meeting',
             'user_name' => $userName,
+            'permissions' => $join->metadata['permissions'] ?? null,
         ];
     }
 

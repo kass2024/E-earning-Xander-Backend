@@ -30,7 +30,11 @@ class LiveMeetingJoinService
         bool $isOwner,
     ): array {
         $meta = is_array($material->metadata) ? $material->metadata : [];
-        $roomName = trim((string) CourseMaterialHelper::meetingId($material));
+        $roomName = trim((string) (
+            CourseMaterialHelper::externalMeetingReference($material)
+            ?? CourseMaterialHelper::meetingId($material)
+            ?? ($meta['daily_room_name'] ?? '')
+        ));
         $roomUrl = trim((string) ($meta['daily_room_url'] ?? $meta['join_url'] ?? $material->resource_url ?? ''));
 
         if ($roomName !== '' && $roomUrl === '') {
@@ -72,6 +76,12 @@ class LiveMeetingJoinService
             isOwner: $isOwner,
             platformInstitutionId: isset($meta['platform_institution_id']) ? (int) $meta['platform_institution_id'] : null,
             expiresAt: $expiresAt,
+            context: [
+                'meeting_role' => $isOwner
+                    ? \App\Services\Meetings\DailyPermissionPolicy::ROLE_HOST
+                    : \App\Services\Meetings\DailyPermissionPolicy::ROLE_ATTENDEE,
+                'meeting_mode' => \App\Services\Meetings\DailyPermissionPolicy::MODE_MEETING,
+            ],
         ));
 
         return [
@@ -80,7 +90,10 @@ class LiveMeetingJoinService
             'token' => $join->token,
             'room_name' => $roomName,
             'role' => $isOwner ? 1 : 0,
+            'meeting_role' => $join->metadata['meeting_role'] ?? ($isOwner ? 'host' : 'attendee'),
+            'meeting_mode' => 'meeting',
             'user_name' => $userName,
+            'permissions' => $join->metadata['permissions'] ?? null,
         ];
     }
 

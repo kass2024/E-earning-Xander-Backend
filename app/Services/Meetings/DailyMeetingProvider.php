@@ -107,35 +107,53 @@ class DailyMeetingProvider implements MeetingProviderInterface
         $recordingEnabled = (bool) config('daily.recording_enabled', false)
             || (bool) config('daily.enabled', false);
 
+        $policy = app(DailyPermissionPolicy::class);
+        $role = $policy->resolveRole($request->isOwner, $request->context);
+        $mode = $policy->resolveMode($request->context);
+        $permProps = $policy->tokenPermissionProps($role, $mode);
+
         $tokenProps = [
             'room_name' => $request->externalMeetingId,
-            'is_owner' => $request->isOwner,
+            'is_owner' => (bool) $permProps['is_owner'],
             'user_name' => $request->userName,
             'user_id' => (string) $request->userId,
             'exp' => $exp,
             'nbf' => $nbf,
             'eject_at_token_exp' => true,
-            'enable_screenshare' => true,
-            'start_video_off' => true,
-            'start_audio_off' => false,
+            'enable_screenshare' => (bool) $permProps['enable_screenshare'],
+            'start_video_off' => (bool) $permProps['start_video_off'],
+            'start_audio_off' => (bool) $permProps['start_audio_off'],
+            'permissions' => $permProps['permissions'],
             'lang' => (string) config('daily.default_language', 'en'),
-            'enable_recording_ui' => $request->isOwner && $recordingEnabled,
+            'enable_recording_ui' => $permProps['is_owner'] && $recordingEnabled,
         ];
 
-        if ($request->isOwner && $recordingEnabled) {
+        if ($permProps['is_owner'] && $recordingEnabled) {
             $tokenProps['enable_recording'] = 'cloud';
         }
 
         $token = $this->daily->createMeetingToken($tokenProps);
 
+        \Illuminate\Support\Facades\Log::info('daily.meeting_token_issued', [
+            'room_name' => $request->externalMeetingId,
+            'user_id' => (string) $request->userId,
+            'meeting_role' => $role,
+            'meeting_mode' => $mode,
+            'is_owner' => (bool) $permProps['is_owner'],
+            // never log the token itself
+        ]);
+
         return new MeetingJoinResult(
             provider: MeetingProvider::Daily,
             joinUrl: $request->roomUrl,
-            role: $request->isOwner ? 'host' : 'participant',
+            role: $role,
             token: $token,
             externalMeetingId: $request->externalMeetingId,
             metadata: [
                 'room_name' => $request->externalMeetingId,
+                'meeting_role' => $role,
+                'meeting_mode' => $mode,
+                'permissions' => $permProps['permissions'],
             ],
         );
     }

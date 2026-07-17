@@ -52,7 +52,7 @@ class DailyApiService
             // Hide "poor network" panel — noisy for classroom joins.
             'enable_network_ui' => false,
             'start_video_off' => true,
-            'start_audio_off' => false,
+            'start_audio_off' => true,
             'lang' => (string) config('daily.default_language', 'en'),
         ];
 
