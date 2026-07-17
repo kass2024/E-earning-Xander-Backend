@@ -104,11 +104,7 @@ class ZoomEmbedController extends Controller
             ? $this->resolveHostTenantInstitutionId($actorUser instanceof User ? $actorUser : null, $data, null)
             : (isset($data['platform_institution_id']) ? (int) $data['platform_institution_id'] : null);
 
-        $trustedOwner = false;
-        if ($sanctumUser) {
-            $appRole = strtolower((string) ($sanctumUser->role ?? ''));
-            $trustedOwner = in_array($appRole, ['admin', 'staff', 'instructor', 'partner_company'], true);
-        }
+        $trustedOwner = $this->resolveTrustedOwner($sanctumUser, $actorUser instanceof User ? $actorUser : null);
 
         $adminMeeting = $rawMeetingNumber !== ''
             ? $this->adminZoomJoin->findByRoomName($rawMeetingNumber)
@@ -125,17 +121,19 @@ class ZoomEmbedController extends Controller
                 return response()->json(['message' => $e->getMessage()], 422);
             }
 
-            $brandingInstitutionId = ($trustedOwner && $role === 1 && $actorUser instanceof User
-                && PlatformInstitutionHelper::isMainPlatformAdmin($actorUser))
-                ? null
-                : ($adminMeeting->platform_institution_id
-                    ? (int) $adminMeeting->platform_institution_id
-                    : $platformInstitutionId);
+            $brandingInstitutionId = $this->adminMeetingBrandingInstitutionId($adminMeeting, $actorUser instanceof User ? $actorUser : null, $role);
             $branding = $this->meetingBrandingPayload(
                 $actorEmail,
                 $brandingInstitutionId,
-                $this->hostBrandingAllowsActorInstitutionFallback($actorUser instanceof User ? $actorUser : null, $data),
+                false,
             );
+            $branding['session_title'] = trim((string) ($adminMeeting->topic ?? '')) ?: 'Meeting';
+            $branding['meeting_mode'] = strtolower(trim((string) (
+                $adminMeeting->meeting_mode
+                ?? $adminMeeting->meta['meeting_mode']
+                ?? $adminMeeting->meta['type']
+                ?? 'meeting'
+            )));
             if ($trustedOwner && $role === 1) {
                 $zoomHost = $this->zoomService->resolveConfiguredHostBranding(
                     $brandingInstitutionId,
@@ -189,17 +187,19 @@ class ZoomEmbedController extends Controller
                 return response()->json(['message' => $e->getMessage()], 422);
             }
 
-            $brandingInstitutionId = ($trustedOwner && $role === 1 && $actorUser instanceof User
-                && PlatformInstitutionHelper::isMainPlatformAdmin($actorUser))
-                ? null
-                : ($settings->platform_institution_id
-                    ? (int) $settings->platform_institution_id
-                    : $platformInstitutionId);
+            $brandingInstitutionId = $settings->platform_institution_id
+                ? (int) $settings->platform_institution_id
+                : ($this->isHubScopedDailyRoom($dailyRoom) ? null : $platformInstitutionId);
+            if ($trustedOwner && $role === 1 && $actorUser instanceof User && PlatformInstitutionHelper::isMainPlatformAdmin($actorUser)) {
+                $brandingInstitutionId = null;
+            }
             $branding = $this->meetingBrandingPayload(
                 $actorEmail,
                 $brandingInstitutionId,
-                $this->hostBrandingAllowsActorInstitutionFallback($actorUser instanceof User ? $actorUser : null, $data),
+                false,
             );
+            $branding['session_title'] = 'Webinar';
+            $branding['meeting_mode'] = 'webinar';
             if ($trustedOwner && $role === 1) {
                 $zoomHost = $this->zoomService->resolveConfiguredHostBranding(
                     $brandingInstitutionId,
@@ -802,6 +802,49 @@ class ZoomEmbedController extends Controller
 
         // Institution instructors / partners: fall back to course/meeting tenant when needed.
         return $courseInstitutionId && $courseInstitutionId > 0 ? $courseInstitutionId : null;
+    }
+
+    protected function resolveTrustedOwner(?User $sanctumUser, ?User $actorUser): bool
+    {
+        $userForTrust = $sanctumUser ?? $actorUser;
+        if (!$userForTrust) {
+            return false;
+        }
+
+        $appRole = strtolower((string) ($userForTrust->role ?? ''));
+
+        return in_array($appRole, ['admin', 'staff', 'instructor', 'partner_company'], true);
+    }
+
+    protected function isHubScopedDailyRoom(string $roomName): bool
+    {
+        $roomName = trim($roomName);
+
+        return $roomName !== ''
+            && (str_contains($roomName, '-main-')
+                || str_starts_with($roomName, 'admin-meet-main-')
+                || str_starts_with($roomName, 'admin-webinar-main-'));
+    }
+
+    protected function adminMeetingBrandingInstitutionId(
+        \App\Models\AdminZoomMeeting $meeting,
+        ?User $actorUser,
+        int $role,
+    ): ?int {
+        $room = trim((string) ($meeting->daily_room_name ?: $meeting->zoom_meeting_id ?? ''));
+        if ($this->isHubScopedDailyRoom($room)) {
+            return null;
+        }
+
+        $meetingInstitutionId = $meeting->platform_institution_id
+            ? (int) $meeting->platform_institution_id
+            : null;
+
+        if ($role === 1 && $actorUser && PlatformInstitutionHelper::isMainPlatformAdmin($actorUser) && $meetingInstitutionId === null) {
+            return null;
+        }
+
+        return $meetingInstitutionId;
     }
 
     /**

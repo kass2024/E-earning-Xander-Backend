@@ -243,7 +243,9 @@ class ZoomController extends Controller
         $payload = $request->all();
 
         $user = $request->user();
-        $institutionId = $user && !empty($user->platform_institution_id)
+        $institutionId = $user
+            && !empty($user->platform_institution_id)
+            && !\App\Support\PlatformInstitutionHelper::isMainPlatformAdmin($user)
             ? (int) $user->platform_institution_id
             : null;
         $hostId = $this->zoom->resolveHostUserId(
@@ -436,9 +438,18 @@ class ZoomController extends Controller
 
     public function deleteMeeting(Request $request, string $id)
     {
+        $id = trim($id);
+        $joinService = app(AdminZoomMeetingJoinService::class);
+
         $adminMeeting = \App\Models\AdminZoomMeeting::query()
-            ->where('zoom_meeting_id', $id)
+            ->where(function ($query) use ($id) {
+                $query->where('zoom_meeting_id', $id)
+                    ->orWhere('daily_room_name', $id);
+            })
             ->first();
+        if (!$adminMeeting && $joinService->looksLikeDailyRoomName($id)) {
+            $adminMeeting = $joinService->findByRoomName($id);
+        }
 
         $actor = \App\Support\PlatformInstitutionHelper::resolveActorFromRequest($request) ?: $request->user();
         if ($adminMeeting) {
@@ -456,27 +467,43 @@ class ZoomController extends Controller
                 return response()->json(['message' => 'Not allowed to delete this meeting.'], 403);
             }
 
-            $joinService = app(AdminZoomMeetingJoinService::class);
-            if ($joinService->isDailyMeeting($adminMeeting)) {
+            if ($joinService->isDailyMeeting($adminMeeting) || $joinService->looksLikeDailyRoomName($id)) {
                 $joinService->deleteDailyRoom($adminMeeting);
-                AdminZoomMeetingRegistry::unregister($id);
+                AdminZoomMeetingRegistry::unregister((string) $adminMeeting->zoom_meeting_id);
+                if ($id !== (string) $adminMeeting->zoom_meeting_id) {
+                    AdminZoomMeetingRegistry::unregister($id);
+                }
 
                 return response()->json(['message' => 'Meeting deleted']);
             }
         }
 
-        if (!preg_match('/^\d{9,15}$/', preg_replace('/\D+/', '', $id))) {
+        if ($joinService->looksLikeDailyRoomName($id)) {
+            try {
+                app(DailyApiService::class)->deleteRoom($id);
+            } catch (\Throwable) {
+                // Room may already be gone.
+            }
+            AdminZoomMeetingRegistry::unregister($id);
+
+            return response()->json(['message' => 'Meeting removed']);
+        }
+
+        $digitsOnly = preg_replace('/\D+/', '', $id);
+        if (!preg_match('/^\d{9,15}$/', (string) $digitsOnly)) {
             AdminZoomMeetingRegistry::unregister($id);
 
             return response()->json(['message' => 'Meeting removed']);
         }
 
         $ok = $this->zoom->deleteMeeting($id);
-        if (!$ok) {
-            return response()->json(['message' => 'Unable to delete meeting on Zoom'], 500);
-        }
-
         AdminZoomMeetingRegistry::unregister($id);
+
+        if (!$ok) {
+            return response()->json([
+                'message' => 'Meeting removed from dashboard. It may already be ended on Zoom.',
+            ]);
+        }
 
         return response()->json(['message' => 'Meeting deleted on Zoom']);
     }

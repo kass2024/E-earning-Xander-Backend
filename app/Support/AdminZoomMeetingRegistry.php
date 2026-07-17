@@ -159,7 +159,12 @@ class AdminZoomMeetingRegistry
             return;
         }
 
-        AdminZoomMeeting::query()->where('zoom_meeting_id', $meetingId)->delete();
+        AdminZoomMeeting::query()
+            ->where(function ($query) use ($meetingId) {
+                $query->where('zoom_meeting_id', $meetingId)
+                    ->orWhere('daily_room_name', $meetingId);
+            })
+            ->delete();
     }
 
     /**
