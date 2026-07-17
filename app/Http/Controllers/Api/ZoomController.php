@@ -230,6 +230,7 @@ class ZoomController extends Controller
             'type' => 'nullable|string|in:meeting,webinar',
             'recurrence' => 'nullable|string|in:none,daily,weekly,monthly',
             'reminder' => 'nullable|string|in:none,10m,1h,24h',
+            'category' => 'nullable|string|max:100',
         ]);
 
         $payload = $request->all();

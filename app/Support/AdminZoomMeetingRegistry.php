@@ -111,7 +111,18 @@ class AdminZoomMeetingRegistry
         $merged = [];
         foreach ($records as $record) {
             $id = (string) $record->zoom_meeting_id;
-            $merged[] = $zoomById[$id] ?? $record->toMeetingArray();
+            $base = $record->toMeetingArray();
+            $fromZoom = $zoomById[$id] ?? null;
+            if (is_array($fromZoom)) {
+                $merged[] = array_merge($fromZoom, [
+                    'meeting_mode' => $base['meeting_mode'] ?? ($fromZoom['meeting_mode'] ?? 'meeting'),
+                    'provider' => $fromZoom['provider'] ?? ($base['provider'] ?? null),
+                    'agenda' => $fromZoom['agenda'] ?? ($base['agenda'] ?? null),
+                    'topic' => $fromZoom['topic'] ?? ($base['topic'] ?? null),
+                ]);
+            } else {
+                $merged[] = $base;
+            }
         }
 
         return $merged;
