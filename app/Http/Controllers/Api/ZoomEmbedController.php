@@ -125,9 +125,12 @@ class ZoomEmbedController extends Controller
                 return response()->json(['message' => $e->getMessage()], 422);
             }
 
-            $brandingInstitutionId = $adminMeeting->platform_institution_id
-                ? (int) $adminMeeting->platform_institution_id
-                : $platformInstitutionId;
+            $brandingInstitutionId = ($trustedOwner && $role === 1 && $actorUser instanceof User
+                && PlatformInstitutionHelper::isMainPlatformAdmin($actorUser))
+                ? null
+                : ($adminMeeting->platform_institution_id
+                    ? (int) $adminMeeting->platform_institution_id
+                    : $platformInstitutionId);
             $branding = $this->meetingBrandingPayload(
                 $actorEmail,
                 $brandingInstitutionId,
@@ -186,9 +189,12 @@ class ZoomEmbedController extends Controller
                 return response()->json(['message' => $e->getMessage()], 422);
             }
 
-            $brandingInstitutionId = $settings->platform_institution_id
-                ? (int) $settings->platform_institution_id
-                : $platformInstitutionId;
+            $brandingInstitutionId = ($trustedOwner && $role === 1 && $actorUser instanceof User
+                && PlatformInstitutionHelper::isMainPlatformAdmin($actorUser))
+                ? null
+                : ($settings->platform_institution_id
+                    ? (int) $settings->platform_institution_id
+                    : $platformInstitutionId);
             $branding = $this->meetingBrandingPayload(
                 $actorEmail,
                 $brandingInstitutionId,
@@ -609,17 +615,18 @@ class ZoomEmbedController extends Controller
 
         $settings = WebinarSetting::forInstitution($actorInstitutionId);
 
-        $storedHost = trim((string) ($settings->zoom_host_user_id ?? ''));
-        if ($storedHost !== '' && str_contains($storedHost, '@')) {
-            $actorEmail = $storedHost;
-            $actorUser = User::query()->whereRaw('LOWER(email) = ?', [strtolower(trim($actorEmail))])->first();
-        }
+        // Keep the authenticated host for branding. Do not swap the actor to a stored
+        // zoom_host_user_id email — that can pull a partner institution onto the hub.
         $settingsInstitutionId = $settings->platform_institution_id ? (int) $settings->platform_institution_id : null;
         $platformInstitutionId = $this->resolveHostTenantInstitutionId(
             $actorUser instanceof User ? $actorUser : null,
             $data,
             $settingsInstitutionId ?? $actorInstitutionId,
         );
+        // Main platform hosts always brand as the hub, never a partner settings tenant.
+        if ($actorUser instanceof User && PlatformInstitutionHelper::isMainPlatformAdmin($actorUser)) {
+            $platformInstitutionId = null;
+        }
         $zoomHost = $this->zoomService->resolveConfiguredHostBranding(
             $platformInstitutionId,
             $actorUser?->id ? (int) $actorUser->id : null,
