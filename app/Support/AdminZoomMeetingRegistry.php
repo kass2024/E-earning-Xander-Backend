@@ -53,7 +53,7 @@ class AdminZoomMeetingRegistry
                 'agenda' => $zoomResponse['agenda'] ?? ($requestPayload['agenda'] ?? null),
                 'created_by_user_id' => $createdByUserId,
                 'meta' => self::buildMeta($requestPayload),
-                'meeting_provider' => (string) ($requestPayload['meeting_provider'] ?? $zoomResponse['provider'] ?? 'zoom'),
+                'meeting_provider' => (string) ($requestPayload['meeting_provider'] ?? $zoomResponse['provider'] ?? 'daily'),
                 'meeting_mode' => (string) ($requestPayload['meeting_mode'] ?? $requestPayload['type'] ?? 'meeting'),
                 'daily_room_name' => $requestPayload['daily_room_name']
                     ?? ((($zoomResponse['provider'] ?? null) === 'daily') ? $meetingId : null),

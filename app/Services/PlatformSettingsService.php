@@ -18,7 +18,7 @@ class PlatformSettingsService
         }
 
         return MeetingProvider::fromStringOrDefault(
-            (string) config('services.daily.main_platform_meeting_provider', 'daily'),
+            (string) config('daily.main_platform_meeting_provider', 'daily'),
             MeetingProvider::Daily,
         );
     }
