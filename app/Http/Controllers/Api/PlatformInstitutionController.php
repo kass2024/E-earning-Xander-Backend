@@ -58,6 +58,53 @@ class PlatformInstitutionController extends Controller
         return response()->json($rows);
     }
 
+    /**
+     * Main platform admin creates a partner institution (skips public signup / Stripe).
+     */
+    public function store(Request $request)
+    {
+        $data = $request->validate([
+            'name' => 'required|string|max:255',
+            'contact_email' => 'required|email|max:255',
+            'contact_phone' => 'nullable|string|max:50',
+            'website' => 'nullable|url|max:255',
+            'address' => 'nullable|string|max:1000',
+            'admin_notes' => 'nullable|string|max:5000',
+            'owner_name' => 'nullable|string|max:255',
+            'password' => 'nullable|string|min:8|max:100',
+            'auto_approve' => 'sometimes|boolean',
+            'send_credentials' => 'sometimes|boolean',
+        ]);
+
+        $result = $this->signupService->createByAdmin([
+            'institution_name' => $data['name'],
+            'contact_email' => $data['contact_email'],
+            'contact_phone' => $data['contact_phone'] ?? null,
+            'website' => $data['website'] ?? null,
+            'address' => $data['address'] ?? null,
+            'admin_notes' => $data['admin_notes'] ?? null,
+            'owner_name' => $data['owner_name'] ?? null,
+            'password' => $data['password'] ?? null,
+            'auto_approve' => $data['auto_approve'] ?? true,
+            'send_credentials' => $data['send_credentials'] ?? true,
+            'approved_by' => $request->input('approved_by'),
+        ]);
+
+        if (!($result['ok'] ?? false)) {
+            return response()->json(['message' => $result['message'] ?? 'Could not create institution.'], $result['status'] ?? 422);
+        }
+
+        /** @var PlatformInstitution $institution */
+        $institution = $result['institution'];
+
+        return response()->json([
+            'message' => $result['message'],
+            'institution' => $institution->fresh()->toAdminArray(),
+            'password' => $result['password'] ?? null,
+            'login_url' => $this->signupService->institutionLoginUrl($institution->fresh()),
+        ], 201);
+    }
+
     public function context(Request $request)
     {
         $email = strtolower(trim((string) $request->query('email', '')));
@@ -89,8 +136,6 @@ class PlatformInstitutionController extends Controller
         } catch (\Throwable $e) {
             return response()->json(['message' => 'Institution approved but owner account could not be created: ' . $e->getMessage()], 500);
         }
-
-        $this->zoomHostAssignment->ensureInstitutionHost($platformInstitution->fresh());
 
         if ($platformInstitution->owner_user_id) {
             $ownerStatus = $platformInstitution->payment_status === 'unpaid' ? 'Unpaid' : 'Active';
@@ -124,8 +169,6 @@ class PlatformInstitutionController extends Controller
             $platformInstitution->approved_at = now();
         }
         $platformInstitution->save();
-
-        $this->zoomHostAssignment->ensureInstitutionHost($platformInstitution->fresh());
 
         if ($platformInstitution->owner_user_id) {
             $ownerStatus = $platformInstitution->payment_status === 'unpaid' ? 'Unpaid' : 'Active';
@@ -340,17 +383,59 @@ class PlatformInstitutionController extends Controller
             // Partners inherit the main admin setting; ignore per-institution overrides.
             unset($data['meeting_provider']);
         }
+        // Shared Zoom settings from main admin — ignore per-institution Zoom host overrides.
+        if (array_key_exists('zoom_host_user_id', $data)) {
+            unset($data['zoom_host_user_id']);
+        }
         if (Schema::hasColumn('platform_institutions', 'meeting_provider')) {
             $data['meeting_provider'] = app(\App\Services\PlatformSettingsService::class)
                 ->mainPlatformMeetingProvider()
                 ->value;
         }
 
+        $emailChanged = false;
+        $newEmail = null;
+        if (array_key_exists('contact_email', $data)) {
+            $newEmail = strtolower(trim((string) $data['contact_email']));
+            $data['contact_email'] = $newEmail;
+            $current = strtolower(trim((string) $platformInstitution->contact_email));
+            if ($newEmail !== '' && $newEmail !== $current) {
+                $emailTaken = User::query()
+                    ->whereRaw('LOWER(email) = ?', [$newEmail])
+                    ->when($platformInstitution->owner_user_id, fn ($q) => $q->where('id', '!=', $platformInstitution->owner_user_id))
+                    ->exists();
+                if ($emailTaken) {
+                    return response()->json(['message' => 'That login email is already used by another account.'], 422);
+                }
+                $instTaken = PlatformInstitution::query()
+                    ->whereRaw('LOWER(contact_email) = ?', [$newEmail])
+                    ->where('id', '!=', $platformInstitution->id)
+                    ->exists();
+                if ($instTaken) {
+                    return response()->json(['message' => 'That contact email is already used by another institution.'], 422);
+                }
+                $emailChanged = true;
+            }
+        }
+
         $platformInstitution->fill($data);
         $platformInstitution->save();
 
-        if (array_key_exists('zoom_host_user_id', $data)) {
-            app(\App\Services\ZoomService::class)->invalidateHostUserCache((int) $platformInstitution->id);
+        if ($emailChanged && $newEmail) {
+            $owner = $platformInstitution->owner_user_id
+                ? User::query()->find($platformInstitution->owner_user_id)
+                : null;
+            if (!$owner) {
+                try {
+                    $owner = $this->signupService->ensureOwnerAccount($platformInstitution->fresh());
+                } catch (\Throwable $e) {
+                    return response()->json([
+                        'message' => 'Institution saved but login email could not be synced: ' . $e->getMessage(),
+                    ], 500);
+                }
+            }
+            $owner->email = $newEmail;
+            $owner->save();
         }
 
         return response()->json([

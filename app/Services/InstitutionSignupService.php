@@ -12,6 +12,7 @@ use App\Support\PlatformInstitutionHelper;
 use App\Support\PlatformUserService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Stripe\Checkout\Session as StripeCheckoutSession;
 use Stripe\Stripe;
@@ -74,8 +75,6 @@ class InstitutionSignupService
             $institution->owner_user_id = $user->id;
             $institution->save();
 
-            $this->zoomHostAssignment->ensureInstitutionHost($institution->fresh());
-
             $this->sendOwnerCredentials($institution->fresh(), $user, $plainPassword);
 
             if ($promo) {
@@ -99,6 +98,102 @@ class InstitutionSignupService
                 'requires_payment' => true,
                 'checkout_url' => $checkout['checkout_url'],
                 'message' => 'Registration started. Login credentials have been emailed to you. Complete payment to continue.',
+            ];
+        });
+    }
+
+    /**
+     * Main-admin creates a partner institution (no public signup / Stripe).
+     *
+     * @param  array<string, mixed>  $data
+     * @return array{ok: bool, status?: int, message: string, institution?: PlatformInstitution, password?: string}
+     */
+    public function createByAdmin(array $data): array
+    {
+        $email = strtolower(trim((string) ($data['contact_email'] ?? '')));
+        if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return ['ok' => false, 'status' => 422, 'message' => 'A valid login email is required.'];
+        }
+
+        if (User::whereRaw('LOWER(email) = ?', [$email])->exists()) {
+            return ['ok' => false, 'status' => 422, 'message' => 'An account with this email already exists.'];
+        }
+
+        if (PlatformInstitution::query()->whereRaw('LOWER(contact_email) = ?', [$email])->exists()) {
+            return ['ok' => false, 'status' => 422, 'message' => 'An institution with this contact email already exists.'];
+        }
+
+        $name = trim((string) ($data['institution_name'] ?? $data['name'] ?? ''));
+        if ($name === '') {
+            return ['ok' => false, 'status' => 422, 'message' => 'Institution name is required.'];
+        }
+
+        $autoApprove = (bool) ($data['auto_approve'] ?? true);
+        $sendCredentials = (bool) ($data['send_credentials'] ?? true);
+        $ownerName = trim((string) ($data['owner_name'] ?? ''));
+        if ($ownerName === '') {
+            $ownerName = $name . ' Admin';
+        }
+
+        return DB::transaction(function () use ($data, $email, $name, $autoApprove, $sendCredentials, $ownerName) {
+            $feeCents = $this->signupFeeCents();
+            $provider = app(\App\Services\PlatformSettingsService::class)
+                ->mainPlatformMeetingProvider()
+                ->value;
+
+            $attrs = [
+                'name' => $name,
+                'slug' => PlatformInstitutionHelper::uniqueSlug($name),
+                'contact_email' => $email,
+                'contact_phone' => $data['contact_phone'] ?? null,
+                'website' => $data['website'] ?? null,
+                'address' => $data['address'] ?? null,
+                'admin_notes' => $data['admin_notes'] ?? null,
+                'status' => $autoApprove ? 'active' : 'pending_approval',
+                'payment_status' => 'promo',
+                'signup_fee_cents' => $feeCents,
+                'currency' => config('institution.signup_currency', 'usd'),
+            ];
+            if (Schema::hasColumn('platform_institutions', 'meeting_provider')) {
+                $attrs['meeting_provider'] = $provider;
+            }
+            if ($autoApprove) {
+                $attrs['approved_at'] = now();
+            }
+
+            $institution = PlatformInstitution::create($attrs);
+
+            $plainPassword = trim((string) ($data['password'] ?? ''));
+            if ($plainPassword === '') {
+                $plainPassword = $this->generateOwnerPassword();
+            }
+
+            $user = User::create([
+                'name' => $ownerName,
+                'email' => $email,
+                'password' => $plainPassword,
+                'role' => 'partner_company',
+                'status' => $autoApprove ? 'Active' : 'Pending',
+                'phone' => $data['contact_phone'] ?? '',
+                'platform_institution_id' => $institution->id,
+            ]);
+
+            $institution->owner_user_id = $user->id;
+            $institution->save();
+
+            // Partners use shared main-admin Zoom/Daily settings — do not assign per-institution Zoom hosts.
+
+            if ($sendCredentials) {
+                $this->sendOwnerCredentials($institution->fresh(), $user, $plainPassword);
+            }
+
+            return [
+                'ok' => true,
+                'message' => $autoApprove
+                    ? 'Institution created and activated.'
+                    : 'Institution created and pending approval.',
+                'institution' => $institution->fresh(),
+                'password' => $plainPassword,
             ];
         });
     }

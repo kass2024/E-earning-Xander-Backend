@@ -265,6 +265,7 @@ Route::prefix('admin')->group(function () {
 
     Route::post('users', [UserController::class, 'store']);
     Route::get('platform-institutions', [PlatformInstitutionController::class, 'index']);
+    Route::post('platform-institutions', [PlatformInstitutionController::class, 'store']);
     Route::post('platform-institutions/backfill-zoom-hosts', [PlatformInstitutionController::class, 'backfillZoomHosts']);
     Route::get('platform-institutions/{platformInstitution}', [PlatformInstitutionController::class, 'show']);
     Route::put('platform-institutions/{platformInstitution}', [PlatformInstitutionController::class, 'update']);

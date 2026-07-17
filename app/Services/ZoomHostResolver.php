@@ -97,21 +97,16 @@ class ZoomHostResolver
 
     protected function resolveInstitutionHostEmail(int $platformInstitutionId): ?string
     {
-        if (!Schema::hasTable('platform_institutions')) {
-            return null;
+        // Partners share the main-admin Zoom host configuration (ZOOM_HOST_USER_ID / platform pool).
+        // Per-institution zoom_host_user_id is no longer used for meeting creation.
+        $platform = $this->platformHostPool();
+        if ($platform !== []) {
+            return $this->hostFromPool($platform, $platformInstitutionId) ?? $platform[0];
         }
 
-        $institution = PlatformInstitution::query()->find($platformInstitutionId);
-        if (!$institution) {
-            return null;
-        }
+        $default = $this->defaultHostEmail();
 
-        $explicit = trim((string) ($institution->zoom_host_user_id ?? ''));
-        if ($explicit !== '') {
-            return $explicit;
-        }
-
-        return $this->hostFromPool($this->institutionHostPool(), $platformInstitutionId);
+        return $default !== '' ? $default : null;
     }
 
     protected function resolvePlatformActorHostEmail(?int $platformUserId, ?string $actorEmail): ?string
