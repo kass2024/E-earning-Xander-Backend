@@ -17,7 +17,9 @@ class PlatformInstitution extends Model
         'mail_use_custom', 'mail_host', 'mail_port', 'mail_username', 'mail_password',
         'mail_encryption', 'mail_from_address', 'mail_from_name', 'mail_ehlo_domain',
         'portal_tagline', 'portal_hero_title', 'portal_hero_subtitle', 'portal_about',
-        'portal_primary_color', 'portal_features', 'portal_hero_image_path', 'portal_cta_label',
+        'portal_primary_color', 'portal_accent_color', 'portal_hero_bg_color',
+        'portal_button_bg_color', 'portal_button_text_color',
+        'portal_features', 'portal_hero_image_path', 'portal_cta_label',
         'zoom_host_user_id',
         'meeting_provider',
     ];
@@ -119,7 +121,11 @@ class PlatformInstitution extends Model
             'hero_subtitle' => trim((string) ($this->portal_hero_subtitle ?? ''))
                 ?: 'Explore programs, live classes, and expert-led training built for your success.',
             'about' => $about,
-            'primary_color' => $this->portal_primary_color ?: null,
+            'primary_color' => $this->normalizePortalHex($this->portal_primary_color),
+            'accent_color' => $this->normalizePortalHex($this->portal_accent_color),
+            'hero_bg_color' => $this->normalizePortalHex($this->portal_hero_bg_color),
+            'button_bg_color' => $this->normalizePortalHex($this->portal_button_bg_color),
+            'button_text_color' => $this->normalizePortalHex($this->portal_button_text_color),
             'features' => array_values(array_map(static function ($item) {
                 return [
                     'title' => (string) ($item['title'] ?? ''),
@@ -129,6 +135,16 @@ class PlatformInstitution extends Model
             'hero_image_url' => $this->portalHeroImageUrl(),
             'cta_label' => trim((string) ($this->portal_cta_label ?? '')) ?: 'Start enrollment',
         ];
+    }
+
+    private function normalizePortalHex(mixed $value): ?string
+    {
+        $color = strtoupper(trim((string) ($value ?? '')));
+        if ($color !== '' && preg_match('/^#[0-9A-F]{3}([0-9A-F]{3})?([0-9A-F]{2})?$/', $color)) {
+            return $color;
+        }
+
+        return null;
     }
 
     public function toPublicArray(): array

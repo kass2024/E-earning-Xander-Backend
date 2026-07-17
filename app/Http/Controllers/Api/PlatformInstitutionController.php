@@ -364,6 +364,16 @@ class PlatformInstitutionController extends Controller
             'mail_ehlo_domain' => 'nullable|string|max:255',
             'zoom_host_user_id' => 'nullable|string|max:255',
             'meeting_provider' => 'sometimes|string|in:zoom,daily',
+            'portal_tagline' => 'nullable|string|max:255',
+            'portal_hero_title' => 'nullable|string|max:255',
+            'portal_hero_subtitle' => 'nullable|string|max:2000',
+            'portal_about' => 'nullable|string|max:5000',
+            'portal_primary_color' => ['nullable', 'string', 'max:16', 'regex:/^#[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?([0-9A-Fa-f]{2})?$/'],
+            'portal_accent_color' => ['nullable', 'string', 'max:16', 'regex:/^#[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?([0-9A-Fa-f]{2})?$/'],
+            'portal_hero_bg_color' => ['nullable', 'string', 'max:16', 'regex:/^#[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?([0-9A-Fa-f]{2})?$/'],
+            'portal_button_bg_color' => ['nullable', 'string', 'max:16', 'regex:/^#[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?([0-9A-Fa-f]{2})?$/'],
+            'portal_button_text_color' => ['nullable', 'string', 'max:16', 'regex:/^#[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?([0-9A-Fa-f]{2})?$/'],
+            'portal_cta_label' => 'nullable|string|max:120',
         ]);
 
         if (array_key_exists('mail_password', $data)) {
@@ -473,7 +483,11 @@ class PlatformInstitutionController extends Controller
             'portal_hero_title' => 'nullable|string|max:255',
             'portal_hero_subtitle' => 'nullable|string|max:2000',
             'portal_about' => 'nullable|string|max:5000',
-            'portal_primary_color' => 'nullable|string|max:16',
+            'portal_primary_color' => ['nullable', 'string', 'max:16', 'regex:/^#[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?([0-9A-Fa-f]{2})?$/'],
+            'portal_accent_color' => ['nullable', 'string', 'max:16', 'regex:/^#[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?([0-9A-Fa-f]{2})?$/'],
+            'portal_hero_bg_color' => ['nullable', 'string', 'max:16', 'regex:/^#[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?([0-9A-Fa-f]{2})?$/'],
+            'portal_button_bg_color' => ['nullable', 'string', 'max:16', 'regex:/^#[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?([0-9A-Fa-f]{2})?$/'],
+            'portal_button_text_color' => ['nullable', 'string', 'max:16', 'regex:/^#[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?([0-9A-Fa-f]{2})?$/'],
             'portal_cta_label' => 'nullable|string|max:120',
             'portal_features' => 'nullable|json',
             'portal_hero_image' => 'nullable|file|mimes:png,jpg,jpeg,gif,webp|max:8192',
@@ -521,10 +535,20 @@ class PlatformInstitutionController extends Controller
             'portal_hero_subtitle',
             'portal_about',
             'portal_primary_color',
+            'portal_accent_color',
+            'portal_hero_bg_color',
+            'portal_button_bg_color',
+            'portal_button_text_color',
             'portal_cta_label',
         ] as $portalField) {
             if (array_key_exists($portalField, $data)) {
-                $institution->{$portalField} = $data[$portalField];
+                $institution->{$portalField} = $data[$portalField] !== null && $data[$portalField] !== ''
+                    ? strtoupper(trim((string) $data[$portalField]))
+                    : null;
+                // Don't uppercase non-color portal text fields.
+                if (!str_ends_with($portalField, '_color')) {
+                    $institution->{$portalField} = $data[$portalField];
+                }
             }
         }
 
