@@ -33,7 +33,8 @@ class InstitutionSignupService
     public function register(array $data, ?string $promoCode = null): array
     {
         $email = strtolower(trim((string) ($data['contact_email'] ?? '')));
-        if (User::whereRaw('LOWER(email) = ?', [$email])->exists()) {
+        $existing = User::query()->whereRaw('LOWER(email) = ?', [$email])->first();
+        if ($existing && $this->emailIsProtected($existing)) {
             return ['ok' => false, 'status' => 422, 'message' => 'An account with this email already exists.'];
         }
 
@@ -45,7 +46,7 @@ class InstitutionSignupService
             }
         }
 
-        return DB::transaction(function () use ($data, $email, $promo) {
+        return DB::transaction(function () use ($data, $email, $promo, $existing) {
             $feeCents = $this->signupFeeCents();
             $institution = PlatformInstitution::create([
                 'name' => trim((string) $data['institution_name']),
@@ -62,15 +63,32 @@ class InstitutionSignupService
             ]);
 
             $plainPassword = $this->generateOwnerPassword();
-            $user = User::create([
-                'name' => trim(($data['first_name'] ?? '') . ' ' . ($data['last_name'] ?? '')),
-                'email' => $email,
-                'password' => $plainPassword,
-                'role' => 'partner_company',
-                'status' => $promo ? 'Unpaid' : 'Pending',
-                'phone' => $data['contact_phone'] ?? '',
-                'platform_institution_id' => $institution->id,
-            ]);
+            $ownerName = trim(($data['first_name'] ?? '') . ' ' . ($data['last_name'] ?? ''));
+            if ($ownerName === '') {
+                $ownerName = trim((string) $data['institution_name']) . ' Admin';
+            }
+
+            if ($existing) {
+                $existing->name = $ownerName;
+                $existing->email = $email;
+                $existing->role = 'partner_company';
+                $existing->status = $promo ? 'Unpaid' : 'Pending';
+                $existing->phone = $data['contact_phone'] ?? ($existing->phone ?? '');
+                $existing->platform_institution_id = $institution->id;
+                $existing->save();
+                PlatformUserService::setUserPassword($existing, $plainPassword);
+                $user = $existing->fresh();
+            } else {
+                $user = User::create([
+                    'name' => $ownerName,
+                    'email' => $email,
+                    'password' => $plainPassword,
+                    'role' => 'partner_company',
+                    'status' => $promo ? 'Unpaid' : 'Pending',
+                    'phone' => $data['contact_phone'] ?? '',
+                    'platform_institution_id' => $institution->id,
+                ]);
+            }
 
             $institution->owner_user_id = $user->id;
             $institution->save();
@@ -115,12 +133,17 @@ class InstitutionSignupService
             return ['ok' => false, 'status' => 422, 'message' => 'A valid login email is required.'];
         }
 
-        if (User::whereRaw('LOWER(email) = ?', [$email])->exists()) {
-            return ['ok' => false, 'status' => 422, 'message' => 'An account with this email already exists.'];
-        }
-
         if (PlatformInstitution::query()->whereRaw('LOWER(contact_email) = ?', [$email])->exists()) {
             return ['ok' => false, 'status' => 422, 'message' => 'An institution with this contact email already exists.'];
+        }
+
+        $existing = User::query()->whereRaw('LOWER(email) = ?', [$email])->first();
+        if ($existing && $this->emailIsProtected($existing)) {
+            return [
+                'ok' => false,
+                'status' => 422,
+                'message' => 'An account with this email already exists (' . $existing->role . ').',
+            ];
         }
 
         $name = trim((string) ($data['institution_name'] ?? $data['name'] ?? ''));
@@ -135,7 +158,7 @@ class InstitutionSignupService
             $ownerName = $name . ' Admin';
         }
 
-        return DB::transaction(function () use ($data, $email, $name, $autoApprove, $sendCredentials, $ownerName) {
+        return DB::transaction(function () use ($data, $email, $name, $autoApprove, $sendCredentials, $ownerName, $existing) {
             $feeCents = $this->signupFeeCents();
             $provider = app(\App\Services\PlatformSettingsService::class)
                 ->mainPlatformMeetingProvider()
@@ -168,15 +191,28 @@ class InstitutionSignupService
                 $plainPassword = $this->generateOwnerPassword();
             }
 
-            $user = User::create([
-                'name' => $ownerName,
-                'email' => $email,
-                'password' => $plainPassword,
-                'role' => 'partner_company',
-                'status' => $autoApprove ? 'Active' : 'Pending',
-                'phone' => $data['contact_phone'] ?? '',
-                'platform_institution_id' => $institution->id,
-            ]);
+            if ($existing) {
+                // Reclaim leftover meeting_user / orphan partner from a deleted institution.
+                $existing->name = $ownerName;
+                $existing->email = $email;
+                $existing->role = 'partner_company';
+                $existing->status = $autoApprove ? 'Active' : 'Pending';
+                $existing->phone = $data['contact_phone'] ?? ($existing->phone ?? '');
+                $existing->platform_institution_id = $institution->id;
+                $existing->save();
+                PlatformUserService::setUserPassword($existing, $plainPassword);
+                $user = $existing->fresh();
+            } else {
+                $user = User::create([
+                    'name' => $ownerName,
+                    'email' => $email,
+                    'password' => $plainPassword,
+                    'role' => 'partner_company',
+                    'status' => $autoApprove ? 'Active' : 'Pending',
+                    'phone' => $data['contact_phone'] ?? '',
+                    'platform_institution_id' => $institution->id,
+                ]);
+            }
 
             $institution->owner_user_id = $user->id;
             $institution->save();
@@ -196,6 +232,153 @@ class InstitutionSignupService
                 'password' => $plainPassword,
             ];
         });
+    }
+
+    /**
+     * True when the account must not be deleted/reclaimed for partner login
+     * (admin/staff/instructor, or owner of a different live institution).
+     */
+    public function emailIsProtected(User $user, ?int $forInstitutionId = null): bool
+    {
+        $role = strtolower(trim((string) ($user->role ?? '')));
+        if (in_array($role, ['admin', 'staff', 'instructor'], true)) {
+            return true;
+        }
+
+        $ownsOther = PlatformInstitution::query()
+            ->where('owner_user_id', $user->id)
+            ->when($forInstitutionId, fn ($q) => $q->where('id', '!=', $forInstitutionId))
+            ->exists();
+
+        if ($ownsOther) {
+            return true;
+        }
+
+        $linkedOther = $user->platform_institution_id
+            && (int) $user->platform_institution_id !== (int) ($forInstitutionId ?? 0)
+            && PlatformInstitution::query()->whereKey((int) $user->platform_institution_id)->exists()
+            && $role === 'partner_company';
+
+        return (bool) $linkedOther;
+    }
+
+    /**
+     * Remove institution owner + linked partner users so their emails can be reused.
+     */
+    public function purgeInstitutionAccounts(PlatformInstitution $institution): void
+    {
+        $ids = User::query()
+            ->where('platform_institution_id', $institution->id)
+            ->pluck('id')
+            ->all();
+
+        if ($institution->owner_user_id) {
+            $ids[] = (int) $institution->owner_user_id;
+        }
+
+        $contact = strtolower(trim((string) $institution->contact_email));
+        if ($contact !== '') {
+            $byEmail = User::query()
+                ->whereRaw('LOWER(email) = ?', [$contact])
+                ->whereIn('role', ['partner_company', 'meeting_user'])
+                ->pluck('id')
+                ->all();
+            $ids = array_merge($ids, $byEmail);
+        }
+
+        $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
+        if ($ids === []) {
+            return;
+        }
+
+        User::query()
+            ->whereIn('id', $ids)
+            ->get()
+            ->each(function (User $user) use ($institution) {
+                if ($this->emailIsProtected($user, (int) $institution->id)) {
+                    // Detach from this institution but keep protected accounts.
+                    if ((int) $user->platform_institution_id === (int) $institution->id) {
+                        $user->platform_institution_id = null;
+                        $user->save();
+                    }
+
+                    return;
+                }
+                $user->delete();
+            });
+    }
+
+    /**
+     * Delete leftover partner accounts that are not tied to any institution.
+     * (Does not mass-delete meeting_user guests — those are reclaimed when an email is assigned.)
+     *
+     * @return list<array{id:int,email:string,role:string}>
+     */
+    public function purgeOrphanPartnerAccounts(bool $dryRun = false): array
+    {
+        $ownerIds = PlatformInstitution::query()
+            ->whereNotNull('owner_user_id')
+            ->pluck('owner_user_id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+        $liveInstIds = PlatformInstitution::query()->pluck('id')->map(fn ($id) => (int) $id)->all();
+
+        $removed = [];
+        User::query()
+            ->where('role', 'partner_company')
+            ->orderBy('id')
+            ->each(function (User $user) use ($ownerIds, $liveInstIds, $dryRun, &$removed) {
+                if ($this->emailIsProtected($user)) {
+                    return;
+                }
+                if (in_array((int) $user->id, $ownerIds, true)) {
+                    return;
+                }
+
+                $pid = $user->platform_institution_id ? (int) $user->platform_institution_id : null;
+                $orphan = $pid === null || !in_array($pid, $liveInstIds, true);
+                if (!$orphan) {
+                    return;
+                }
+
+                $removed[] = [
+                    'id' => (int) $user->id,
+                    'email' => (string) $user->email,
+                    'role' => (string) $user->role,
+                ];
+                if (!$dryRun) {
+                    $user->delete();
+                }
+            });
+
+        return $removed;
+    }
+
+    /**
+     * Assign login email to institution owner, reclaiming leftover meeting_user rows when needed.
+     */
+    public function syncOwnerLoginEmail(PlatformInstitution $institution, string $email): User
+    {
+        $email = strtolower(trim($email));
+        $previousOwnerId = $institution->owner_user_id ? (int) $institution->owner_user_id : null;
+
+        $institution->contact_email = $email;
+        $institution->save();
+
+        $owner = $this->ensureOwnerAccount($institution->fresh());
+
+        if ($previousOwnerId && $previousOwnerId !== (int) $owner->id) {
+            $previous = User::query()->find($previousOwnerId);
+            if ($previous && !$this->emailIsProtected($previous, (int) $institution->id)) {
+                // Old partner login for this institution — free the account so the email stays unique only once.
+                if ((int) ($previous->platform_institution_id ?? 0) === (int) $institution->id
+                    || strtolower(trim((string) $previous->role)) === 'partner_company') {
+                    $previous->delete();
+                }
+            }
+        }
+
+        return $owner;
     }
 
     public function generateOwnerPassword(): string
@@ -262,6 +445,11 @@ class InstitutionSignupService
 
         $user = User::query()->whereRaw('LOWER(TRIM(email)) = ?', [$email])->first();
         if ($user) {
+            if ($this->emailIsProtected($user, (int) $institution->id)) {
+                throw new \InvalidArgumentException(
+                    'That login email is already used by another account (' . $user->role . ').'
+                );
+            }
             $user->role = 'partner_company';
             $user->platform_institution_id = $institution->id;
             $user->status = $this->ownerStatusForInstitution($institution);

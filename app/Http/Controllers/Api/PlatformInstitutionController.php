@@ -296,7 +296,7 @@ class PlatformInstitutionController extends Controller
 
     public function destroy(PlatformInstitution $platformInstitution)
     {
-        User::where('platform_institution_id', $platformInstitution->id)->delete();
+        $this->signupService->purgeInstitutionAccounts($platformInstitution);
         $platformInstitution->payments()->delete();
         $platformInstitution->delete();
 
@@ -400,12 +400,14 @@ class PlatformInstitutionController extends Controller
             $data['contact_email'] = $newEmail;
             $current = strtolower(trim((string) $platformInstitution->contact_email));
             if ($newEmail !== '' && $newEmail !== $current) {
-                $emailTaken = User::query()
+                $conflict = User::query()
                     ->whereRaw('LOWER(email) = ?', [$newEmail])
                     ->when($platformInstitution->owner_user_id, fn ($q) => $q->where('id', '!=', $platformInstitution->owner_user_id))
-                    ->exists();
-                if ($emailTaken) {
-                    return response()->json(['message' => 'That login email is already used by another account.'], 422);
+                    ->first();
+                if ($conflict && $this->signupService->emailIsProtected($conflict, (int) $platformInstitution->id)) {
+                    return response()->json([
+                        'message' => 'That login email is already used by another account (' . $conflict->role . ').',
+                    ], 422);
                 }
                 $instTaken = PlatformInstitution::query()
                     ->whereRaw('LOWER(contact_email) = ?', [$newEmail])
@@ -418,24 +420,21 @@ class PlatformInstitutionController extends Controller
             }
         }
 
+        // Apply non-email fields first; login email sync reclaims orphan accounts separately.
+        if ($emailChanged) {
+            unset($data['contact_email']);
+        }
         $platformInstitution->fill($data);
         $platformInstitution->save();
 
         if ($emailChanged && $newEmail) {
-            $owner = $platformInstitution->owner_user_id
-                ? User::query()->find($platformInstitution->owner_user_id)
-                : null;
-            if (!$owner) {
-                try {
-                    $owner = $this->signupService->ensureOwnerAccount($platformInstitution->fresh());
-                } catch (\Throwable $e) {
-                    return response()->json([
-                        'message' => 'Institution saved but login email could not be synced: ' . $e->getMessage(),
-                    ], 500);
-                }
+            try {
+                $this->signupService->syncOwnerLoginEmail($platformInstitution->fresh(), $newEmail);
+            } catch (\Throwable $e) {
+                return response()->json([
+                    'message' => 'Institution saved but login email could not be synced: ' . $e->getMessage(),
+                ], 500);
             }
-            $owner->email = $newEmail;
-            $owner->save();
         }
 
         return response()->json([
