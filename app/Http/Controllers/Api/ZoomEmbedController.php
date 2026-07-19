@@ -930,11 +930,8 @@ class ZoomEmbedController extends Controller
         }
 
         $role = strtolower(trim((string) ($user->role ?? '')));
-        if (in_array($role, ['admin', 'staff', 'partner_company'], true)) {
-            return true;
-        }
-
-        if ($role !== 'instructor') {
+        // View-only for unassigned courses; hosting requires assign_cours.
+        if (!in_array($role, ['instructor', 'admin', 'staff', 'partner_company'], true)) {
             return false;
         }
 

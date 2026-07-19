@@ -81,11 +81,9 @@ class InstructorDashboardController extends Controller
         }
 
         $role = strtolower(trim((string) ($user->role ?? '')));
-        if (in_array($role, ['admin', 'staff', 'partner_company'], true)) {
-            return true;
-        }
-
-        if ($role !== 'instructor') {
+        // Admins/staff/partners may view all tenant courses, but may only schedule/start
+        // live classes for courses assigned to them in Course Management.
+        if (!in_array($role, ['instructor', 'admin', 'staff', 'partner_company'], true)) {
             return false;
         }
 
@@ -358,7 +356,7 @@ class InstructorDashboardController extends Controller
             ])
             ->orderBy('title')
             ->get()
-            ->map(fn (Course $course) => $this->mapLiveClassCourse($course))
+            ->map(fn (Course $course) => $this->mapLiveClassCourse($course, $instructor))
             ->values();
 
         return response()->json(
@@ -367,8 +365,10 @@ class InstructorDashboardController extends Controller
         );
     }
 
-    private function mapLiveClassCourse(Course $course): array
+    private function mapLiveClassCourse(Course $course, ?User $actor = null): array
     {
+        $canHost = $actor ? $this->canHostCourse($actor, $course) : false;
+
         return [
             'id' => $course->id,
             'title' => $course->title,
@@ -376,6 +376,8 @@ class InstructorDashboardController extends Controller
             'status' => $course->status,
             'duration' => $course->duration,
             'paid_enrollments_count' => (int) ($course->paid_enrollments_count ?? 0),
+            'can_host' => $canHost,
+            'assigned_to_me' => $canHost,
         ];
     }
 
@@ -392,7 +394,7 @@ class InstructorDashboardController extends Controller
 
         $courses = $coursesQuery
             ->get()
-            ->map(fn (Course $course) => $this->mapLiveClassCourse($course))
+            ->map(fn (Course $course) => $this->mapLiveClassCourse($course, $actor))
             ->values();
 
         $courseIds = $courses->pluck('id');
@@ -431,11 +433,12 @@ class InstructorDashboardController extends Controller
         }
 
         $sessions = $sessions
-            ->map(function (CourseMaterial $material) use ($liveMeetingIds) {
+            ->map(function (CourseMaterial $material) use ($liveMeetingIds, $actor) {
                 $row = CourseMaterialHelper::toLiveClassArray($material, $liveMeetingIds);
                 $row['scheduled_at'] = $row['start_time']
                     ?? CourseMaterialHelper::scheduledAt($material)?->toIso8601String();
                 $row['created_at'] = $material->created_at?->toIso8601String();
+                $row['can_host'] = $this->canHostMaterial($actor, $material);
 
                 return $row;
             })

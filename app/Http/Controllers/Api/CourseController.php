@@ -425,12 +425,9 @@ class CourseController extends Controller
 
             $isAssigned = $instructor->assignedCourses()->where('courses.id', $course->id)->exists();
             if (!$isAssigned) {
-                // Portal admins may schedule/host without being assigned; do not auto-assign.
-                if (!InstructorLookup::isPortalTeacher($instructor)) {
-                    return response()->json([
-                        'message' => 'You are not assigned to this course. Ask an administrator to assign it in Course Management.',
-                    ], 403);
-                }
+                return response()->json([
+                    'message' => 'You are not assigned to this course. Assign it to yourself in Course Management before scheduling a live class.',
+                ], 403);
             }
         }
 
