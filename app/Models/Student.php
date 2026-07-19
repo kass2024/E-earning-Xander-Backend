@@ -11,6 +11,7 @@ class Student extends Model
     use HasFactory;
 
     protected $fillable = [
+        'name',
         'first_name',
         'last_name',
         'email',
@@ -36,15 +37,30 @@ class Student extends Model
         // add casts here if you later add extra JSON/date columns
     ];
 
+    protected static function booted(): void
+    {
+        static::saving(function (Student $student) {
+            // Keep legacy DB `name` column in sync (NOT NULL, no default).
+            $full = trim(($student->first_name ?? '') . ' ' . ($student->last_name ?? ''));
+            $student->attributes['name'] = $full !== ''
+                ? $full
+                : (string) ($student->email ?? $student->attributes['email'] ?? '');
+        });
+    }
+
     public function getNameAttribute(): string
     {
-        $full = trim(($this->first_name ?? '') . ' ' . ($this->last_name ?? ''));
+        $full = trim(($this->attributes['first_name'] ?? $this->first_name ?? '') . ' ' . ($this->attributes['last_name'] ?? $this->last_name ?? ''));
 
         if ($full !== '') {
             return $full;
         }
 
-        return (string) ($this->email ?? '');
+        if (!empty($this->attributes['name'])) {
+            return (string) $this->attributes['name'];
+        }
+
+        return (string) ($this->attributes['email'] ?? $this->email ?? '');
     }
 
     /**

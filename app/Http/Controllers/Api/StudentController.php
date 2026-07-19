@@ -61,32 +61,47 @@ class StudentController extends Controller
             'phone' => 'nullable|string|max:255',
             'country' => 'nullable|string|max:255',
             'primary_goal' => 'nullable|string|max:255',
+            'password' => 'nullable|string|min:6|max:255',
             'selected_courses' => 'nullable|array',
             'selected_courses.*' => 'nullable|string|max:255',
             'platform_institution_id' => 'nullable|integer|exists:platform_institutions,id',
         ]);
 
+        $plainPassword = trim((string) ($validated['password'] ?? ''));
+        if ($plainPassword === '') {
+            $plainPassword = '12345678';
+        }
+
+        $firstName = trim((string) $validated['first_name']);
+        $lastName = trim((string) ($validated['last_name'] ?? ''));
+        $displayName = trim($firstName . ' ' . $lastName);
+
         $payload = [
-            'first_name' => $validated['first_name'],
-            'last_name'  => $validated['last_name'],
+            'name' => $displayName !== '' ? $displayName : $validated['email'],
+            'first_name' => $firstName,
+            'last_name'  => $lastName,
             'email'      => $validated['email'],
             'status'     => $validated['status'] ?? 'Active',
             'phone'      => $validated['phone'] ?? '',
             'country'    => $validated['country'] ?? '',
             'primary_goal' => $validated['primary_goal'] ?? '',
             'platform_institution_id' => $validated['platform_institution_id'] ?? null,
-            'password'   => '12345678',
+            'password'   => $plainPassword,
         ];
         PlatformTenantScope::stampInstitutionId($request, $payload);
         $student = Student::create($payload);
 
-        // Send welcome email with default password and any selected courses
+        // Welcome email should not block student creation.
         $selectedCourses = $validated['selected_courses'] ?? [];
-        app(StudentRegistrationEmailService::class)->sendWelcomeEmail(
-            $student,
-            '12345678',
-            $selectedCourses
-        );
+        try {
+            app(StudentRegistrationEmailService::class)->sendWelcomeEmail(
+                $student,
+                $plainPassword,
+                $selectedCourses
+            );
+        } catch (\Throwable $e) {
+            report($e);
+        }
 
         $this->bumpStudentCaches();
 
