@@ -46,7 +46,13 @@ class AvailableScheduleController extends Controller
     private function resolveInstitutionIdForWrite(Request $request): ?int
     {
         $actor = PlatformInstitutionHelper::resolveActorFromRequest($request) ?: $request->user();
-        if ($actor && strtolower(trim((string) ($actor->role ?? ''))) === 'partner_company') {
+
+        // Anonymous writes must not land on the hub calendar.
+        if (!$actor) {
+            return 0;
+        }
+
+        if (strtolower(trim((string) ($actor->role ?? ''))) === 'partner_company') {
             $id = (int) ($actor->platform_institution_id ?? 0);
             if ($id > 0) {
                 return $id;
@@ -178,6 +184,11 @@ class AvailableScheduleController extends Controller
         ]);
 
         $institutionId = $this->resolveInstitutionId($request);
+        if ($institutionId === 0) {
+            return response()->json([
+                'message' => 'Your institution account is not linked. Re-login and try again.',
+            ], 422);
+        }
         $settings = WebinarTenant::settingsFor($institutionId);
         $settings->calendar_blocked_months = array_values(array_unique($data['blocked_months'] ?? []));
         $settings->calendar_blocked_dates = array_values(array_unique($data['blocked_dates'] ?? []));

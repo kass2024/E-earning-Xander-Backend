@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\AvailableSchedule;
 use App\Models\MeetingRegistration;
+use App\Models\PlatformInstitution;
 use App\Models\User;
 use App\Support\PlatformInstitutionHelper;
 use Illuminate\Console\Command;
@@ -11,7 +12,7 @@ use Illuminate\Support\Facades\Schema;
 
 /**
  * Institution availability/bookings stamped as hub (null) leak into the main dashboard.
- * Backfill platform_institution_id from the creator or linked schedule.
+ * Backfill platform_institution_id from the creator, linked schedule, or booker email.
  */
 class RepairMeetingTenantIsolation extends Command
 {
@@ -85,26 +86,7 @@ class RepairMeetingTenantIsolation extends Command
             ->whereNull('platform_institution_id')
             ->orderBy('id')
             ->each(function (MeetingRegistration $registration) use ($dryRun, &$fixed) {
-                $institutionId = 0;
-                $schedule = $registration->availableSchedule;
-                if ($schedule && !empty($schedule->platform_institution_id)) {
-                    $institutionId = (int) $schedule->platform_institution_id;
-                }
-
-                if ($institutionId <= 0 && Schema::hasColumn('available_schedules', 'created_by') && $schedule?->created_by) {
-                    $creator = User::query()->find($schedule->created_by);
-                    if ($creator
-                        && !empty($creator->platform_institution_id)
-                        && !PlatformInstitutionHelper::isMainPlatformAdmin($creator)
-                    ) {
-                        $institutionId = (int) $creator->platform_institution_id;
-                        if (!$dryRun && empty($schedule->platform_institution_id)) {
-                            $schedule->platform_institution_id = $institutionId;
-                            $schedule->save();
-                        }
-                    }
-                }
-
+                $institutionId = $this->resolveRegistrationInstitutionId($registration);
                 if ($institutionId <= 0) {
                     return;
                 }
@@ -121,5 +103,71 @@ class RepairMeetingTenantIsolation extends Command
             });
 
         return $fixed;
+    }
+
+    private function resolveRegistrationInstitutionId(MeetingRegistration $registration): int
+    {
+        $schedule = $registration->availableSchedule;
+        if ($schedule && !empty($schedule->platform_institution_id)) {
+            return (int) $schedule->platform_institution_id;
+        }
+
+        if (Schema::hasColumn('available_schedules', 'created_by') && $schedule?->created_by) {
+            $creator = User::query()->find($schedule->created_by);
+            if ($creator
+                && !empty($creator->platform_institution_id)
+                && !PlatformInstitutionHelper::isMainPlatformAdmin($creator)
+            ) {
+                return (int) $creator->platform_institution_id;
+            }
+        }
+
+        if (!empty($registration->user_id)) {
+            $user = User::query()->find($registration->user_id);
+            if ($user
+                && !empty($user->platform_institution_id)
+                && !PlatformInstitutionHelper::isMainPlatformAdmin($user)
+            ) {
+                return (int) $user->platform_institution_id;
+            }
+        }
+
+        $email = strtolower(trim((string) ($registration->email ?? '')));
+        if ($email === '') {
+            return 0;
+        }
+
+        $byEmail = User::query()
+            ->whereRaw('LOWER(TRIM(email)) = ?', [$email])
+            ->whereNotNull('platform_institution_id')
+            ->where('platform_institution_id', '>', 0)
+            ->orderByDesc('id')
+            ->first();
+        if ($byEmail && !PlatformInstitutionHelper::isMainPlatformAdmin($byEmail)) {
+            return (int) $byEmail->platform_institution_id;
+        }
+
+        $byContact = PlatformInstitution::query()
+            ->whereRaw('LOWER(TRIM(contact_email)) = ?', [$email])
+            ->orderByDesc('id')
+            ->first();
+        if ($byContact) {
+            return (int) $byContact->id;
+        }
+
+        $ownerIds = User::query()
+            ->whereRaw('LOWER(TRIM(email)) = ?', [$email])
+            ->pluck('id');
+        if ($ownerIds->isNotEmpty()) {
+            $owned = PlatformInstitution::query()
+                ->whereIn('owner_user_id', $ownerIds->all())
+                ->orderByDesc('id')
+                ->first();
+            if ($owned) {
+                return (int) $owned->id;
+            }
+        }
+
+        return 0;
     }
 }
