@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>{{ config('app.name') }} - Course Application Update</title>
+    <title>{{ $companyName ?? ($emailBrand['companyName'] ?? config('app.name')) }} - Course Application Update</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         body { margin: 0; padding: 0; background-color: #f3f4f6; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #111827; }
@@ -22,7 +22,7 @@
 <div class="wrapper">
   <div class="container">
     <div class="header">
-      <div class="header-title">{{ config('app.name') }}</div>
+      <div class="header-title">{{ $companyName ?? ($emailBrand['companyName'] ?? config('app.name')) }}</div>
       <div class="header-subtitle">Course application update</div>
     </div>
     <div class="body">
@@ -38,12 +38,12 @@
         </div>
       @endif
       <p class="paragraph">
-        You are welcome to explore other courses and programs within {{ config('app.name') }} that
+        You are welcome to explore other courses and programs within {{ $companyName ?? ($emailBrand['companyName'] ?? config('app.name')) }} that
         may better fit your current profile or goals.
       </p>
       <p class="paragraph" style="margin-top: 20px;">
         Best regards,<br>
-        <strong>{{ config('app.name') }}</strong>
+        <strong>{{ $companyName ?? ($emailBrand['companyName'] ?? config('app.name')) }}</strong>
       </p>
     </div>
     <div class="footer">

@@ -83,24 +83,37 @@ class QuizScheduledReminderService
                 continue;
             }
 
-            $ok = $this->mail->sendView(
-                'emails.quiz_scheduled_reminder',
-                [
-                    'student' => $student,
-                    'course' => $course,
-                    'quiz' => $quiz,
-                    'kindLabel' => $kindLabel,
-                    'takeUrl' => $takeUrl,
-                    'opensAtLabel' => $opensAtLabel,
-                    'timeLimit' => QuizMaterialHelper::timeLimitMinutes($quiz),
-                    'passingScore' => (int) ($meta['passing_score'] ?? 70),
-                ],
-                function ($message) use ($email, $quiz, $kindLabel) {
-                    $message->to($email)
-                        ->subject($kindLabel . ' reminder: ' . ($quiz->title ?? 'Assessment') . ' starts in 1h 30m');
-                },
-                ['quiz_id' => $quiz->id, 'student_id' => $student->id, 'reminder' => '90m']
-            );
+            $institutionId = (int) ($course->platform_institution_id ?? 0);
+            $payload = [
+                'student' => $student,
+                'course' => $course,
+                'quiz' => $quiz,
+                'kindLabel' => $kindLabel,
+                'takeUrl' => $takeUrl,
+                'opensAtLabel' => $opensAtLabel,
+                'timeLimit' => QuizMaterialHelper::timeLimitMinutes($quiz),
+                'passingScore' => (int) ($meta['passing_score'] ?? 70),
+            ];
+            $callback = function ($message) use ($email, $quiz, $kindLabel) {
+                $message->to($email)
+                    ->subject($kindLabel . ' reminder: ' . ($quiz->title ?? 'Assessment') . ' starts in 1h 30m');
+            };
+            $context = ['quiz_id' => $quiz->id, 'student_id' => $student->id, 'reminder' => '90m'];
+
+            $ok = $institutionId > 0
+                ? $this->mail->sendViewForInstitution(
+                    $institutionId,
+                    'emails.quiz_scheduled_reminder',
+                    $payload,
+                    $callback,
+                    $context
+                )
+                : $this->mail->sendView(
+                    'emails.quiz_scheduled_reminder',
+                    $payload,
+                    $callback,
+                    $context
+                );
 
             if ($ok) {
                 $sent++;

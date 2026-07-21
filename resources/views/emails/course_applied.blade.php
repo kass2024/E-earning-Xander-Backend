@@ -20,7 +20,7 @@
 <div class="wrapper">
     <div class="container">
         <div class="header">
-            <div class="header-title">{{ config('app.name') }}</div>
+            <div class="header-title">{{ $companyName ?? ($emailBrand['companyName'] ?? config('app.name')) }}</div>
             <p style="margin-top:8px; font-size:14px;">Course application confirmation</p>
         </div>
         <div class="body">
@@ -45,7 +45,7 @@
             </p>
             <p class="paragraph" style="margin-top:20px;">
                 Best regards,<br>
-                <span class="highlight">{{ config('app.name') }}</span>
+                <span class="highlight">{{ $companyName ?? ($emailBrand['companyName'] ?? config('app.name')) }}</span>
             </p>
         </div>
         <div class="footer">

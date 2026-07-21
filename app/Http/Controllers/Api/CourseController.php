@@ -300,6 +300,19 @@ class CourseController extends Controller
         ApiListCache::bump('analytics');
     }
 
+    /**
+     * Send course-related mail with institution branding when the course belongs to a partner.
+     */
+    protected function sendCourseMail(Course $course, string $to, $mailable, array $context = []): bool
+    {
+        $institutionId = (int) ($course->platform_institution_id ?? 0);
+        if ($institutionId > 0) {
+            return $this->mail->sendToForInstitution($institutionId, $to, $mailable, $context);
+        }
+
+        return $this->mail->sendTo($to, $mailable, $context);
+    }
+
     public function enroll(Request $request, Course $course)
     {
         $data = $request->validate([
@@ -358,13 +371,13 @@ class CourseController extends Controller
 
         if ($student && $student->email) {
             if ($autoApprove) {
-                $this->mail->sendTo(
+                $this->sendCourseMail($course, 
                     $student->email,
                     new CourseEnrollmentApprovedMail($student, $course),
                     ['event' => 'enrollment_approved', 'student_id' => $data['student_id'], 'course_id' => $course->id]
                 );
             } else {
-                $this->mail->sendTo(
+                $this->sendCourseMail($course, 
                     $student->email,
                     new CourseAppliedMail($student, $course, $enrollment->level),
                     ['event' => 'course_applied', 'student_id' => $data['student_id'], 'course_id' => $course->id]
@@ -437,7 +450,7 @@ class CourseController extends Controller
 
         $student = Student::find($data['student_id']);
         if ($student && $student->email) {
-            $this->mail->sendTo(
+            $this->sendCourseMail($course, 
                 $student->email,
                 new CourseEnrollmentApprovedMail($student, $course),
                 ['event' => 'enrollment_approved', 'student_id' => $data['student_id'], 'course_id' => $course->id]
@@ -619,7 +632,7 @@ class CourseController extends Controller
         $learnerPortalUrl = CourseMaterialHelper::learnerPortalUrl();
 
         if ($staff && !empty($staff->email)) {
-            $this->mail->sendTo(
+            $this->sendCourseMail($course, 
                 $staff->email,
                 new StaffClassScheduledMail(
                     $staff,
@@ -651,7 +664,7 @@ class CourseController extends Controller
                 ? CourseMaterialHelper::embedRoomUrl($material, 0, (int) $student->id)
                 : $learnerPortalUrl;
 
-            if ($this->mail->sendTo(
+            if ($this->sendCourseMail($course, 
                 $student->email,
                 new CourseClassScheduledMail(
                     $student,
@@ -784,7 +797,7 @@ class CourseController extends Controller
 
         $student = Student::find($data['student_id']);
         if ($student && $student->email) {
-            $this->mail->sendTo(
+            $this->sendCourseMail($course, 
                 $student->email,
                 new CourseEnrollmentRejectedMail($student, $course, $data['reason'] ?? null),
                 ['event' => 'enrollment_rejected', 'student_id' => $data['student_id'], 'course_id' => $course->id]
@@ -884,7 +897,7 @@ class CourseController extends Controller
         $sendEmail = $data['send_email'] ?? true;
 
         if ($sendEmail && $student?->email) {
-            $this->mail->sendTo(
+            $this->sendCourseMail($course, 
                 $student->email,
                 new CoursePaymentLinkMail(
                     $student,

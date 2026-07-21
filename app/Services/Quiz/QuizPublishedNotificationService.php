@@ -62,23 +62,36 @@ class QuizPublishedNotificationService
                 continue;
             }
 
-            $ok = $this->mail->sendView(
-                'emails.quiz_published',
-                [
-                    'student' => $student,
-                    'course' => $course,
-                    'quiz' => $quiz,
-                    'kindLabel' => $kindLabel,
-                    'takeUrl' => $takeUrl,
-                    'timeLimit' => QuizMaterialHelper::timeLimitMinutes($quiz),
-                    'passingScore' => (int) ($meta['passing_score'] ?? 70),
-                ],
-                function ($message) use ($email, $quiz, $kindLabel) {
-                    $message->to($email)
-                        ->subject($kindLabel . ' published: ' . ($quiz->title ?? 'Assessment'));
-                },
-                ['quiz_id' => $quiz->id, 'student_id' => $student->id]
-            );
+            $institutionId = (int) ($course->platform_institution_id ?? 0);
+            $payload = [
+                'student' => $student,
+                'course' => $course,
+                'quiz' => $quiz,
+                'kindLabel' => $kindLabel,
+                'takeUrl' => $takeUrl,
+                'timeLimit' => QuizMaterialHelper::timeLimitMinutes($quiz),
+                'passingScore' => (int) ($meta['passing_score'] ?? 70),
+            ];
+            $callback = function ($message) use ($email, $quiz, $kindLabel) {
+                $message->to($email)
+                    ->subject($kindLabel . ' published: ' . ($quiz->title ?? 'Assessment'));
+            };
+            $context = ['quiz_id' => $quiz->id, 'student_id' => $student->id];
+
+            $ok = $institutionId > 0
+                ? $this->mail->sendViewForInstitution(
+                    $institutionId,
+                    'emails.quiz_published',
+                    $payload,
+                    $callback,
+                    $context
+                )
+                : $this->mail->sendView(
+                    'emails.quiz_published',
+                    $payload,
+                    $callback,
+                    $context
+                );
 
             if ($ok) {
                 $sent++;

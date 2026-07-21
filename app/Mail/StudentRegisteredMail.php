@@ -3,6 +3,7 @@
 namespace App\Mail;
 
 use App\Models\Student;
+use App\Support\InstitutionEmailBranding;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Queue\SerializesModels;
@@ -31,12 +32,16 @@ class StudentRegisteredMail extends Mailable
      */
     public function build(): self
     {
-        return $this->subject('Your parrotglobalstudyacademy account & login credentials')
+        $brand = InstitutionEmailBranding::forInstitutionId((int) ($this->student->platform_institution_id ?? 0));
+
+        return $this->subject('Your ' . $brand['companyName'] . ' account & login credentials')
             ->view('emails.student_registered')
             ->with([
                 'student' => $this->student,
                 'password' => $this->password,
                 'selectedCourses' => $this->selectedCourses,
+                'companyName' => $brand['companyName'],
+                'emailBrand' => $brand,
             ]);
     }
 }

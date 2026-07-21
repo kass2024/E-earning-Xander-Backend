@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>{{ config('app.name') }} - Course Enrollment Approved</title>
+    <title>{{ $companyName ?? ($emailBrand['companyName'] ?? config('app.name')) }} - Course Enrollment Approved</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         body { margin: 0; padding: 0; background-color: #f3f4f6; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #111827; }
@@ -24,7 +24,7 @@
 <div class="wrapper">
   <div class="container">
     <div class="header">
-      <div class="header-title">{{ config('app.name') }}</div>
+      <div class="header-title">{{ $companyName ?? ($emailBrand['companyName'] ?? config('app.name')) }}</div>
       <div class="header-subtitle">Course enrollment approved</div>
     </div>
     <div class="body">
@@ -46,11 +46,11 @@
         </p>
       </div>
       <p class="paragraph">
-        Thank you for choosing <strong>{{ config('app.name') }}</strong> for your learning journey.
+        Thank you for choosing <strong>{{ $companyName ?? ($emailBrand['companyName'] ?? config('app.name')) }}</strong> for your learning journey.
       </p>
       <p class="paragraph" style="margin-top: 20px;">
         Best regards,<br>
-        <strong>{{ config('app.name') }}</strong>
+        <strong>{{ $companyName ?? ($emailBrand['companyName'] ?? config('app.name')) }}</strong>
       </p>
     </div>
     <div class="footer">

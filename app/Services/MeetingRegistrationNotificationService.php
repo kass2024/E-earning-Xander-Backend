@@ -4,9 +4,10 @@ namespace App\Services;
 
 use App\Models\AvailableSchedule;
 use App\Models\MeetingRegistration;
-use App\Support\FrontendUrl;
+use App\Support\InstitutionEmailBranding;
 use App\Support\MeetingRegistrationJoinUrl;
 use App\Support\MeetingScheduleTimeFormatter;
+use App\Support\WebinarTenant;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
@@ -18,6 +19,44 @@ class MeetingRegistrationNotificationService
         protected MailDeliveryService $mail,
         protected ZoomService $zoom,
     ) {
+    }
+
+    protected function institutionIdFor(MeetingRegistration $registration): ?int
+    {
+        $id = WebinarTenant::fromRegistration($registration);
+
+        return $id && $id > 0 ? $id : null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @param  callable(\Illuminate\Mail\Message): void  $callback
+     * @param  array<string, mixed>  $context
+     */
+    protected function sendMeetingView(
+        MeetingRegistration $registration,
+        string $view,
+        array $data,
+        callable $callback,
+        array $context = [],
+    ): void {
+        $institutionId = $this->institutionIdFor($registration);
+        $brand = InstitutionEmailBranding::forInstitutionId($institutionId);
+        $payload = array_merge($data, [
+            'appName' => $brand['companyName'],
+            'companyName' => $brand['companyName'],
+            'meetBrand' => $brand['meetBrand'],
+            'emailBrand' => $brand,
+            'brandPrimary' => $brand['primaryColor'],
+            'bookAnotherUrl' => $data['bookAnotherUrl'] ?? $brand['bookMeetingUrl'],
+        ]);
+
+        if ($institutionId) {
+            $this->mail->sendViewForInstitution($institutionId, $view, $payload, $callback, $context);
+            return;
+        }
+
+        $this->mail->sendView($view, $payload, $callback, $context);
     }
 
     public function sendStatusEmail(
@@ -35,7 +74,7 @@ class MeetingRegistrationNotificationService
         try {
             if (strtolower($status) === 'rescheduled') {
                 $meetingRegistration = $this->ensureCancelToken($meetingRegistration);
-                $rebookUrl = $this->bookAnotherUrl();
+                $rebookUrl = $this->bookAnotherUrl($meetingRegistration);
                 $cancelUrl = $this->cancelUrl($meetingRegistration);
 
                 $proposedTime = null;
@@ -53,8 +92,7 @@ class MeetingRegistrationNotificationService
 
                 $defaultApology = "We sincerely apologize for any inconvenience. Due to an unexpected scheduling conflict, we need to reschedule your appointment. Please let us know your preferred date and time, and we will do our best to accommodate you. Thank you for your patience and understanding.";
 
-                $this->mail->sendView('emails.meeting_registration_rescheduled', [
-                    'appName' => config('app.name'),
+                $this->sendMeetingView($meetingRegistration, 'emails.meeting_registration_rescheduled', [
                     'name' => $meetingRegistration->full_name ?? '',
                     'apologyMessage' => ($reason && trim($reason) !== '') ? $reason : $defaultApology,
                     'proposedTime' => $proposedTime,
@@ -68,8 +106,7 @@ class MeetingRegistrationNotificationService
                     'to' => $to,
                 ]);
             } elseif (strtolower($status) === 'rejected') {
-                $this->mail->sendView('emails.meeting_registration_rejected', [
-                    'appName' => config('app.name'),
+                $this->sendMeetingView($meetingRegistration, 'emails.meeting_registration_rejected', [
                     'name' => $meetingRegistration->full_name ?? '',
                     'reason' => $reason,
                 ], function ($message) use ($to) {
@@ -154,10 +191,8 @@ class MeetingRegistrationNotificationService
                     $topic = 'Potential Partnership Discussion';
                 }
 
-                $this->mail->sendView('emails.meeting_registration_approved', [
-                    'appName' => config('app.name'),
-                    'companyName' => config('app.name', 'Xander Global Scholars'),
-                    'meetBrand' => 'XanderTech meet',
+                $brand = InstitutionEmailBranding::forInstitutionId($this->institutionIdFor($meetingRegistration));
+                $this->sendMeetingView($meetingRegistration, 'emails.meeting_registration_approved', [
                     'name' => $meetingRegistration->full_name ?? '',
                     'topic' => $topic,
                     'joinUrl' => $effectiveJoinUrl,
@@ -167,14 +202,14 @@ class MeetingRegistrationNotificationService
                     'duration' => $sessionDetails['duration'],
                     'learnerTimezone' => $sessionDetails['learnerTimezone'],
                     'hostTimezone' => $sessionDetails['hostTimezone'],
-                    'platform' => 'XanderTech meet',
+                    'platform' => $brand['meetBrand'],
                     'scheduleDescription' => $scheduleDescription,
                     'learnerNotes' => $learnerNotes,
                     'recipientEmail' => $to,
                     'cancelUrl' => $this->cancelUrl($meetingRegistration),
-                    'bookAnotherUrl' => $this->bookAnotherUrl(),
-                ], function ($message) use ($to) {
-                    $message->to($to)->subject('Your appointment is confirmed — XanderTech meet');
+                    'bookAnotherUrl' => $this->bookAnotherUrl($meetingRegistration),
+                ], function ($message) use ($to, $brand) {
+                    $message->to($to)->subject('Your appointment is confirmed — ' . $brand['meetBrand']);
                 }, [
                     'event' => 'meeting_registration_approved',
                     'meeting_registration_id' => $meetingRegistration->id ?? null,
@@ -187,11 +222,15 @@ class MeetingRegistrationNotificationService
                 $lines[] = '';
                 $lines[] = 'Your meeting registration status is: ' . $status . '.';
                 $lines[] = '';
+                $brand = InstitutionEmailBranding::forInstitutionId($this->institutionIdFor($meetingRegistration));
                 $lines[] = 'Thank you,';
-                $lines[] = config('app.name');
+                $lines[] = $brand['companyName'];
 
-                $this->mail->sendRaw(implode("\n", $lines), function ($message) use ($to, $subject) {
-                    $message->to($to)->subject($subject);
+                $this->mail->sendRaw(implode("\n", $lines), function ($message) use ($to, $subject, $brand) {
+                    $message->from(
+                        (string) config('mail.from.address'),
+                        $brand['companyName']
+                    )->to($to)->subject($subject);
                 }, [
                     'event' => 'meeting_registration_status',
                     'meeting_registration_id' => $meetingRegistration->id ?? null,
@@ -249,10 +288,8 @@ class MeetingRegistrationNotificationService
             $sessionDetails = MeetingScheduleTimeFormatter::buildEmailDetails($meetingRegistration, $nextSessionText);
         }
 
-        $this->mail->sendView('emails.meeting_registration_reminder', [
-            'appName' => config('app.name'),
-            'companyName' => config('app.name', 'Xander Global Scholars'),
-            'meetBrand' => 'XanderTech meet',
+        $brand = InstitutionEmailBranding::forInstitutionId($this->institutionIdFor($meetingRegistration));
+        $this->sendMeetingView($meetingRegistration, 'emails.meeting_registration_reminder', [
             'name' => $meetingRegistration->full_name ?? '',
             'joinUrl' => $effectiveJoinUrl,
             'joinUrlDisplay' => $this->friendlyJoinDisplay($effectiveJoinUrl),
@@ -261,13 +298,13 @@ class MeetingRegistrationNotificationService
             'duration' => $sessionDetails['duration'],
             'learnerTimezone' => $sessionDetails['learnerTimezone'],
             'hostTimezone' => $sessionDetails['hostTimezone'],
-            'platform' => 'XanderTech meet',
+            'platform' => $brand['meetBrand'],
             'customMessage' => $message,
             'cancelUrl' => $this->cancelUrl($meetingRegistration),
-            'bookAnotherUrl' => $this->bookAnotherUrl(),
+            'bookAnotherUrl' => $this->bookAnotherUrl($meetingRegistration),
             'recipientEmail' => $to,
-        ], function ($messageObj) use ($to) {
-            $messageObj->to($to)->subject('Reminder: Your upcoming XanderTech meet session');
+        ], function ($messageObj) use ($to, $brand) {
+            $messageObj->to($to)->subject('Reminder: Your upcoming ' . $brand['meetBrand'] . ' session');
         }, [
             'event' => 'meeting_registration_reminder',
             'meeting_registration_id' => $meetingRegistration->id ?? null,
@@ -300,9 +337,12 @@ class MeetingRegistrationNotificationService
         return rtrim((string) config('app.url'), '/') . '/meeting/cancel/' . $registration->cancel_token;
     }
 
-    protected function bookAnotherUrl(): string
+    protected function bookAnotherUrl(?MeetingRegistration $registration = null): string
     {
-        return rtrim(FrontendUrl::base(), '/') . '/meeting-registration';
+        $institutionId = $registration ? $this->institutionIdFor($registration) : null;
+        $brand = InstitutionEmailBranding::forInstitutionId($institutionId);
+
+        return $brand['bookMeetingUrl'];
     }
 
     protected function friendlyJoinDisplay(?string $joinUrl): ?string

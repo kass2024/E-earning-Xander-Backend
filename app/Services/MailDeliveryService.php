@@ -31,6 +31,22 @@ class MailDeliveryService
         );
     }
 
+    public function sendViewForInstitution(
+        ?int $platformInstitutionId,
+        string $view,
+        array $data,
+        callable $callback,
+        array $context = [],
+    ): bool {
+        return app(InstitutionMailResolver::class)->sendViewForInstitution(
+            $platformInstitutionId,
+            $view,
+            $data,
+            $callback,
+            array_merge($context, ['type' => 'view', 'view' => $view]),
+        );
+    }
+
     public function sendView(string $view, array $data, callable $callback, array $context = []): bool
     {
         return $this->attempt(function () use ($view, $data, $callback) {

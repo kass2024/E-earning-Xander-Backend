@@ -3,7 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\MeetingRegistration;
-use App\Services\MailDeliveryService;
+use App\Services\MeetingRegistrationNotificationService;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
@@ -15,7 +15,7 @@ class SendMeetingRegistrationReminders extends Command
 
     protected $description = 'Send reminder emails 15 and 5 minutes before scheduled meeting start time';
 
-    public function handle(MailDeliveryService $mail): int
+    public function handle(MeetingRegistrationNotificationService $notifications): int
     {
         if (!Schema::hasColumn('meeting_registrations', 'zoom_start_time')) {
             $this->warn('Required column missing (zoom_start_time).');
@@ -58,34 +58,15 @@ class SendMeetingRegistrationReminders extends Command
                 continue;
             }
 
-            $effectiveJoinUrl = $reg->zoom_join_url ?: (string) config('services.pathways_webinar.zoom_join_url');
-            $nextSessionText = $startAt->format('l, F j, Y g:i A') . ' (' . $tz . ')';
-
-            $sendReminder = function (string $subject, ?string $customMessage) use ($mail, $reg, $effectiveJoinUrl, $nextSessionText) {
-                return $mail->sendView('emails.meeting_registration_reminder', [
-                    'appName' => config('app.name'),
-                    'name' => $reg->full_name ?? '',
-                    'joinUrl' => $effectiveJoinUrl,
-                    'nextSession' => $nextSessionText,
-                    'customMessage' => $customMessage,
-                ], function ($messageObj) use ($reg, $subject) {
-                    $messageObj->to($reg->email)->subject($subject);
-                }, [
-                    'event' => 'meeting_registration_reminder_schedule',
-                    'meeting_registration_id' => $reg->id,
-                ]);
-            };
-
             if ($hasEarlyColumn && empty($reg->reminder_sent_at) && $diff >= 900 && $diff < 960) {
                 try {
-                    if ($sendReminder(
-                        'Reminder: Your session starts in 15 minutes',
-                        'Your Pathways webinar is starting soon. Join using the Zoom link below.'
-                    )) {
-                        $reg->reminder_sent_at = now();
-                        $reg->save();
-                        $earlySent++;
-                    }
+                    $notifications->sendReminderEmail(
+                        $reg,
+                        'Your session is starting soon. Join using the link below.'
+                    );
+                    $reg->reminder_sent_at = now();
+                    $reg->save();
+                    $earlySent++;
                 } catch (\Throwable $e) {
                     Log::warning('Failed to send early meeting registration reminder', [
                         'meeting_registration_id' => $reg->id,
@@ -96,14 +77,13 @@ class SendMeetingRegistrationReminders extends Command
 
             if ($hasFinalColumn && empty($reg->final_reminder_sent_at) && $diff >= 300 && $diff < 360) {
                 try {
-                    if ($sendReminder(
-                        'Reminder: Your session is starting in 5 minutes',
-                        'Your meeting is about to begin. Click the Zoom link below to join now.'
-                    )) {
-                        $reg->final_reminder_sent_at = now();
-                        $reg->save();
-                        $finalSent++;
-                    }
+                    $notifications->sendReminderEmail(
+                        $reg,
+                        'Your meeting is about to begin. Click the link below to join now.'
+                    );
+                    $reg->final_reminder_sent_at = now();
+                    $reg->save();
+                    $finalSent++;
                 } catch (\Throwable $e) {
                     Log::warning('Failed to send final meeting registration reminder', [
                         'meeting_registration_id' => $reg->id,
@@ -112,14 +92,13 @@ class SendMeetingRegistrationReminders extends Command
                 }
             } elseif (!$hasFinalColumn && $hasEarlyColumn && empty($reg->reminder_sent_at) && $diff >= 300 && $diff < 360) {
                 try {
-                    if ($sendReminder(
-                        'Reminder: Your scheduled session is starting soon',
-                        'Your meeting is about to begin. Click the Zoom link below to join now.'
-                    )) {
-                        $reg->reminder_sent_at = now();
-                        $reg->save();
-                        $finalSent++;
-                    }
+                    $notifications->sendReminderEmail(
+                        $reg,
+                        'Your meeting is about to begin. Click the link below to join now.'
+                    );
+                    $reg->reminder_sent_at = now();
+                    $reg->save();
+                    $finalSent++;
                 } catch (\Throwable $e) {
                     Log::warning('Failed to send meeting registration reminder', [
                         'meeting_registration_id' => $reg->id,

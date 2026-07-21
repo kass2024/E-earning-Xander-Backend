@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Welcome to {{ config('app.name') }}</title>
+    <title>Welcome to {{ $companyName ?? ($emailBrand['companyName'] ?? config('app.name')) }}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
     <style>
@@ -154,7 +154,7 @@
 <div class="wrapper">
     <div class="container">
         <div class="header">
-            <div class="header-title">{{ config('app.name') }}</div>
+            <div class="header-title">{{ $companyName ?? ($emailBrand['companyName'] ?? config('app.name')) }}</div>
             <div class="header-subtitle">Your learner account is now created</div>
         </div>
 
@@ -164,7 +164,7 @@
             </p>
 
             <p class="paragraph">
-                Your learner account at <strong>{{ config('app.name') }}</strong> has been created successfully.
+                Your learner account at <strong>{{ $companyName ?? ($emailBrand['companyName'] ?? config('app.name')) }}</strong> has been created successfully.
                 Below you will find your login details. Please keep this information in a safe place.
                 Your course application has also been received and is now <strong>waiting approval from our team</strong>.
             </p>
@@ -222,13 +222,13 @@
 
             <p class="paragraph" style="margin-top: 20px;">
                 Best regards,<br>
-                <strong>{{ config('app.name') }}</strong>
+                <strong>{{ $companyName ?? ($emailBrand['companyName'] ?? config('app.name')) }}</strong>
             </p>
         </div>
 
         <div class="footer">
             <p>
-                You are receiving this email because a learner account was created for you at {{ config('app.name') }}.
+                You are receiving this email because a learner account was created for you at {{ $companyName ?? ($emailBrand['companyName'] ?? config('app.name')) }}.
             </p>
             <p>
                 For assistance, contact
