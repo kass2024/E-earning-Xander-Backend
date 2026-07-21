@@ -22,6 +22,7 @@ use App\Services\StudyShiftProvisioningService;
 use App\Support\PlatformTenantScope;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Schema;
 
 class AuthController extends Controller
 {
@@ -233,17 +234,24 @@ class AuthController extends Controller
             'phone' => 'nullable|string|max:50',
             'country' => 'nullable|string|max:255',
             'primary_goal' => 'nullable|string|max:500',
+            'platform_institution_id' => 'nullable|integer|exists:platform_institutions,id',
         ]);
 
         try {
-            $user = User::create([
+            $create = [
                 'name' => $data['name'],
                 'email' => $data['email'],
                 'password' => $data['password'],
                 'role' => 'instructor',
                 'status' => 'Pending',
                 'phone' => $data['phone'] ?? '',
-            ]);
+            ];
+
+            if (!empty($data['platform_institution_id']) && Schema::hasColumn('users', 'platform_institution_id')) {
+                $create['platform_institution_id'] = (int) $data['platform_institution_id'];
+            }
+
+            $user = User::create($create);
 
             return response()->json([
                 'message' => 'Instructor application submitted',
