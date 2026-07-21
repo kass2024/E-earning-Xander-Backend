@@ -287,13 +287,36 @@ class ZoomController extends Controller
                 $roomName = ($isWebinar ? 'admin-webinar-' : 'admin-meet-')
                     . ($institutionId && $institutionId > 0 ? $institutionId : 'main')
                     . '-' . Str::lower(Str::random(8));
-                $startAt = !empty($payload['start_time'])
-                    ? \Carbon\Carbon::parse((string) $payload['start_time'])
-                    : now();
-                $duration = (int) ($payload['duration'] ?? 30);
+                // Frontend sends wall-clock start_time + IANA timezone (e.g. America/Los_Angeles).
+                // Parsing without the zone uses the server TZ (often Africa/Kigali) and makes
+                // US Pacific times look "in the past", which Daily rejects via room exp.
+                $timezone = trim((string) ($payload['timezone'] ?? '')) ?: (string) config('app.timezone', 'UTC');
+                try {
+                    $startAt = !empty($payload['start_time'])
+                        ? \Carbon\Carbon::parse((string) $payload['start_time'], $timezone)
+                        : now();
+                } catch (\Throwable) {
+                    return response()->json([
+                        'message' => 'Invalid start time or timezone. Use a valid date/time and IANA timezone.',
+                    ], 422);
+                }
+
+                if ($startAt->lt(now()->subMinutes(2))) {
+                    return response()->json([
+                        'message' => 'Start time is in the past for the selected timezone. Pick a future time.',
+                    ], 422);
+                }
+
+                $duration = max(1, (int) ($payload['duration'] ?? 30));
                 $grace = (int) config('daily.room_grace_minutes', 30);
+                $expAt = $startAt->copy()->addMinutes($duration + $grace);
+                $minExp = now()->addMinutes($duration + $grace);
+                if ($expAt->lt($minExp)) {
+                    $expAt = $minExp;
+                }
+
                 $room = $daily->createRoom($roomName, $daily->classroomRoomProperties([
-                    'exp' => $startAt->copy()->addMinutes($duration + $grace)->timestamp,
+                    'exp' => $expAt->timestamp,
                     'start_audio_off' => (bool) ($payload['mute_upon_entry'] ?? true),
                     'start_video_off' => true,
                 ]));
@@ -306,7 +329,7 @@ class ZoomController extends Controller
                     'id' => $resolvedName,
                     'uuid' => $resolvedName,
                     'topic' => (string) ($payload['topic'] ?? 'Meeting'),
-                    'start_time' => $startAt->toIso8601String(),
+                    'start_time' => $startAt->clone()->utc()->toIso8601String(),
                     'duration' => $duration,
                     'join_url' => $appJoinUrl,
                     'start_url' => $appHostUrl,

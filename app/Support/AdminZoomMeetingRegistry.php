@@ -100,7 +100,10 @@ class AdminZoomMeetingRegistry
             return null;
         }
 
-        $startTime = self::parseStartTime($zoomResponse['start_time'] ?? ($requestPayload['start_time'] ?? null));
+        $startTime = self::parseStartTime(
+            $zoomResponse['start_time'] ?? ($requestPayload['start_time'] ?? null),
+            isset($requestPayload['timezone']) ? (string) $requestPayload['timezone'] : null,
+        );
 
         $institutionId = null;
         if (isset($requestPayload['platform_institution_id']) && (int) $requestPayload['platform_institution_id'] > 0) {
@@ -261,14 +264,20 @@ class AdminZoomMeetingRegistry
         return $meta;
     }
 
-    protected static function parseStartTime(mixed $value): ?Carbon
+    protected static function parseStartTime(mixed $value, ?string $timezone = null): ?Carbon
     {
         if ($value === null || $value === '') {
             return null;
         }
 
         try {
-            return Carbon::parse((string) $value);
+            $raw = (string) $value;
+            // Wall-clock times from the client must use the selected IANA zone.
+            if ($timezone && preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/', $raw) === 1) {
+                return Carbon::parse($raw, $timezone);
+            }
+
+            return Carbon::parse($raw);
         } catch (\Throwable) {
             return null;
         }
