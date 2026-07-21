@@ -141,10 +141,10 @@ class CourseController extends Controller
 
         $course = Course::create($payload);
 
-        // Auto-assign the creating teachable actor (admin / partner / instructor).
+        // Auto-assign the creating teachable actor as the sole teacher.
         $actor = PlatformTenantScope::resolveActorUser($request);
         if ($actor && InstructorLookup::isTeachable($actor)) {
-            $actor->assignedCourses()->syncWithoutDetaching([$course->id]);
+            $course->instructors()->sync([(int) $actor->id]);
             if (strcasecmp((string) $course->status, 'Pending') === 0) {
                 $course->status = 'Active';
                 $course->save();
@@ -232,9 +232,28 @@ class CourseController extends Controller
             ], 422);
         }
 
-        $user->assignedCourses()->syncWithoutDetaching([$course->id]);
+        $existingIds = $course->instructors()->pluck('users.id')->map(fn ($id) => (int) $id)->all();
+        $alreadyAssignedToThisUser = in_array((int) $user->id, $existingIds, true);
+        $otherAssignees = array_values(array_filter($existingIds, fn ($id) => (int) $id !== (int) $user->id));
+
+        if (!$alreadyAssignedToThisUser && count($otherAssignees) > 0) {
+            $current = $course->instructors()
+                ->select(['users.id', 'users.name', 'users.email', 'users.role'])
+                ->get();
+
+            return response()->json([
+                'message' => 'This course is already assigned to one person. Unassign them first, then assign someone new.',
+                'assigned' => $current,
+            ], 422);
+        }
+
+        if (!$alreadyAssignedToThisUser) {
+            // Exclusive: one teacher per course.
+            $course->instructors()->sync([(int) $user->id]);
+        }
 
         // Assigned courses must be Active (Manage Courses / My Courses were stuck on Pending).
+        $course->refresh();
         if (strcasecmp(trim((string) ($course->status ?? '')), 'Pending') === 0) {
             $course->status = 'Active';
             $course->save();

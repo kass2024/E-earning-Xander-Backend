@@ -966,7 +966,8 @@ class InstructorDashboardController extends Controller
 
         $course = Course::create($payload);
 
-        $instructor->assignedCourses()->syncWithoutDetaching([$course->id]);
+        // Exclusive: creator is the only assigned teacher.
+        $course->instructors()->sync([(int) $instructor->id]);
 
         return response()->json([
             'message' => 'Course created and assigned to you.',
