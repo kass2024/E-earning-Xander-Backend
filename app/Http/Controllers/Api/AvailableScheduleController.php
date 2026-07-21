@@ -20,13 +20,8 @@ class AvailableScheduleController extends Controller
 
     private function resolveInstitutionId(Request $request): ?int
     {
-        $actor = PlatformInstitutionHelper::resolveActorFromRequest($request);
-        $fromActor = WebinarTenant::actorInstitutionId($actor);
-        if ($fromActor) {
-            return $fromActor;
-        }
-
-        // Public institution portal may pass platform_institution_id without auth.
+        // Prefer explicit tenant from public booking / portal query so schedules match admin settings
+        // even when a logged-in actor (or stale user_email) is also present.
         if ($request->filled('platform_institution_id')) {
             $requested = (int) $request->input('platform_institution_id');
             if ($requested > 0) {
@@ -34,7 +29,26 @@ class AvailableScheduleController extends Controller
             }
         }
 
-        return null;
+        $actor = PlatformInstitutionHelper::resolveActorFromRequest($request);
+        if ($actor && strtolower(trim((string) ($actor->role ?? ''))) === 'partner_company') {
+            $id = (int) ($actor->platform_institution_id ?? 0);
+
+            return $id > 0 ? $id : 0;
+        }
+
+        return WebinarTenant::actorInstitutionId($actor);
+    }
+
+    private function resolveInstitutionIdForWrite(Request $request): ?int
+    {
+        $actor = PlatformInstitutionHelper::resolveActorFromRequest($request) ?: $request->user();
+        if ($actor && strtolower(trim((string) ($actor->role ?? ''))) === 'partner_company') {
+            $id = (int) ($actor->platform_institution_id ?? 0);
+
+            return $id > 0 ? $id : 0;
+        }
+
+        return WebinarTenant::actorInstitutionId($actor instanceof \App\Models\User ? $actor : null);
     }
 
     private function syncDayOfWeek(array $data): array
@@ -172,9 +186,14 @@ class AvailableScheduleController extends Controller
             $data['created_by'] = $user->id;
         }
 
-        $institutionId = WebinarTenant::actorInstitutionId($user instanceof \App\Models\User ? $user : null);
+        $institutionId = $this->resolveInstitutionIdForWrite($request);
+        if ($institutionId === 0) {
+            return response()->json([
+                'message' => 'Your institution account is not linked. Re-login and try again.',
+            ], 422);
+        }
         if (Schema::hasColumn('available_schedules', 'platform_institution_id')) {
-            $data['platform_institution_id'] = $institutionId;
+            $data['platform_institution_id'] = $institutionId && $institutionId > 0 ? $institutionId : null;
         }
 
         $slot = AvailableSchedule::create($data);
@@ -204,7 +223,12 @@ class AvailableScheduleController extends Controller
         $notes = $data['notes'] ?? null;
         $user = PlatformInstitutionHelper::resolveActorFromRequest($request) ?: $request->user();
         $userId = $user?->id;
-        $institutionId = WebinarTenant::actorInstitutionId($user instanceof \App\Models\User ? $user : null);
+        $institutionId = $this->resolveInstitutionIdForWrite($request);
+        if ($institutionId === 0) {
+            return response()->json([
+                'message' => 'Your institution account is not linked. Re-login and try again.',
+            ], 422);
+        }
 
         $created = 0;
         $updated = 0;
@@ -221,7 +245,7 @@ class AvailableScheduleController extends Controller
             ]);
 
             if (Schema::hasColumn('available_schedules', 'platform_institution_id')) {
-                $payload['platform_institution_id'] = $institutionId;
+                $payload['platform_institution_id'] = $institutionId && $institutionId > 0 ? $institutionId : null;
             }
 
             $existingQuery = AvailableSchedule::query()->where('available_on_date', $date);
