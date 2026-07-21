@@ -15,7 +15,11 @@ class StudentController extends Controller
 {
     public function index(Request $request)
     {
-        $tenantId = PlatformTenantScope::resolveTenantId($request);
+        $partnerStrict = PlatformTenantScope::partnerTenantIdStrict($request);
+        if ($partnerStrict === 0) {
+            return response()->json([], 200);
+        }
+        $tenantId = $partnerStrict !== null ? $partnerStrict : PlatformTenantScope::resolveTenantId($request);
 
         if ($tenantId !== null) {
             $students = Student::query()
@@ -34,9 +38,11 @@ class StudentController extends Controller
             return response()->json($students, 200);
         }
 
-        $students = ApiListCache::remember('students', 'all', 120, function () {
+        // Main hub admin: hub-owned students only — never mix partner institutions.
+        $students = ApiListCache::remember('students', 'hub', 120, function () {
             return Student::query()
                 ->select(['id', 'first_name', 'last_name', 'email', 'status', 'phone', 'country', 'primary_goal', 'platform_institution_id', 'created_at'])
+                ->whereNull('platform_institution_id')
                 ->with('platformInstitution:id,name')
                 ->orderByDesc('id')
                 ->get()

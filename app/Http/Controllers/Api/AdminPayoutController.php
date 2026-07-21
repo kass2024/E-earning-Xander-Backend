@@ -13,7 +13,15 @@ class AdminPayoutController extends Controller
     public function index(Request $request)
     {
         $status = $request->query('status');
-        $tenantId = PlatformTenantScope::resolveTenantId($request);
+        $partnerStrict = PlatformTenantScope::partnerTenantIdStrict($request);
+        if ($partnerStrict === 0) {
+            return response()->json([
+                'payoutRequests' => [],
+                'pendingCount' => 0,
+                'pendingAmount' => 0,
+            ], 200);
+        }
+        $tenantId = $partnerStrict !== null ? $partnerStrict : PlatformTenantScope::resolveTenantId($request);
 
         $query = InstructorPayoutRequest::query()
             ->with('instructor:id,name,email,platform_institution_id')
@@ -21,6 +29,9 @@ class AdminPayoutController extends Controller
 
         if ($tenantId !== null) {
             $query->whereHas('instructor', fn ($q) => $q->where('platform_institution_id', $tenantId));
+        } else {
+            // Main hub: hub instructors only — never mix partner payouts.
+            $query->whereHas('instructor', fn ($q) => $q->whereNull('platform_institution_id'));
         }
 
         if ($status) {
@@ -47,6 +58,8 @@ class AdminPayoutController extends Controller
 
         if ($tenantId !== null) {
             $pendingQuery->whereHas('instructor', fn ($q) => $q->where('platform_institution_id', $tenantId));
+        } else {
+            $pendingQuery->whereHas('instructor', fn ($q) => $q->whereNull('platform_institution_id'));
         }
 
         $pending = $pendingQuery->get();

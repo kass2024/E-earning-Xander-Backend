@@ -62,8 +62,9 @@ class PlatformTenantScope
         $explicit = $request->input('platform_institution_id') ?? $request->query('platform_institution_id');
         if ($explicit !== null && $explicit !== '') {
             $user = self::resolveActorUser($request);
-            // Only main platform admins may switch into a partner tenant context.
-            if (!$user || PlatformInstitutionHelper::isMainPlatformAdmin($user)) {
+            // Only authenticated main platform admins may switch into a partner tenant context.
+            // Never accept a bare client institution id without a resolved actor.
+            if ($user && PlatformInstitutionHelper::isMainPlatformAdmin($user)) {
                 return (int) $explicit;
             }
         }
@@ -234,15 +235,45 @@ class PlatformTenantScope
 
     public static function stampInstitutionId(Request $request, array &$data, string $key = 'platform_institution_id'): void
     {
+        // Partners must always stamp their own institution — never trust client override.
+        $partnerId = self::resolvePartnerTenantId($request);
+        if ($partnerId !== null) {
+            $data[$key] = $partnerId;
+
+            return;
+        }
+
         if (!empty($data[$key])) {
             return;
         }
 
-        $tenantId = self::resolvePartnerTenantId($request) ?? self::resolveTenantId($request);
+        $tenantId = self::resolveTenantId($request);
         if ($tenantId !== null) {
             $data[$key] = $tenantId;
         }
         // Main hub creates leave platform_institution_id null (hub-owned).
+    }
+
+    /**
+     * Strict partner tenant for list endpoints.
+     * - null: caller is not a partner_company actor
+     * - positive int: partner institution id
+     * - 0: partner_company without a linked institution (must return empty, never hub/all)
+     */
+    public static function partnerTenantIdStrict(Request $request): ?int
+    {
+        $user = self::resolveActorUser($request);
+        if (!$user) {
+            return null;
+        }
+
+        if (strtolower(trim((string) ($user->role ?? ''))) !== 'partner_company') {
+            return null;
+        }
+
+        $id = (int) ($user->platform_institution_id ?? 0);
+
+        return $id > 0 ? $id : 0;
     }
 
     /**

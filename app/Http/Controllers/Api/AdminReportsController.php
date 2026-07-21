@@ -20,7 +20,11 @@ class AdminReportsController extends Controller
 {
     public function analytics(Request $request)
     {
-        $tenantId = PlatformTenantScope::resolveTenantId($request);
+        $partnerStrict = PlatformTenantScope::partnerTenantIdStrict($request);
+        if ($partnerStrict === 0) {
+            return response()->json($this->buildAnalyticsPayload(-1), 200);
+        }
+        $tenantId = $partnerStrict !== null ? $partnerStrict : PlatformTenantScope::resolveTenantId($request);
         $cacheKey = $tenantId !== null ? 'inst_' . $tenantId : 'hub';
 
         $payload = ApiListCache::remember('analytics', $cacheKey, 180, function () use ($tenantId) {
@@ -33,6 +37,7 @@ class AdminReportsController extends Controller
     protected function buildAnalyticsPayload(?int $tenantId = null): array
     {
         // null tenantId = main hub courses only (never all institutions).
+        // Non-null (including -1 for unlinked partners) scopes to that institution id.
         $tenantCourseIds = PlatformTenantScope::tenantCourseIds($tenantId);
         $now = Carbon::now();
         $months = collect(range(5, 0))->map(function ($i) use ($now) {

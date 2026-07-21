@@ -20,43 +20,19 @@ class PaymentController extends Controller
 
     public function index(Request $request)
     {
-        $tenantId = PlatformTenantScope::resolveTenantId($request);
-
-        if ($tenantId !== null) {
-            $courseIds = PlatformTenantScope::tenantCourseIds($tenantId);
-
-            $payments = CoursePayment::query()
-                ->whereIn('course_id', $courseIds ?: [-1])
-                ->with(['course:id,title,price', 'student:id,first_name,last_name,email,country'])
-                ->orderByDesc('id')
-                ->get()
-                ->map(function (CoursePayment $payment) {
-                    $student = $payment->student;
-
-                    return [
-                        'id' => $payment->id,
-                        'course_id' => $payment->course_id,
-                        'course_title' => $payment->course?->title,
-                        'student_id' => $payment->student_id,
-                        'student_name' => $student
-                            ? trim(($student->first_name ?? '') . ' ' . ($student->last_name ?? ''))
-                            : null,
-                        'student_email' => $student?->email,
-                        'student_country' => $student?->country,
-                        'amount' => round($payment->amount_cents / 100, 2),
-                        'currency' => strtoupper($payment->currency ?? 'usd'),
-                        'provider' => $payment->provider ?? 'stripe',
-                        'status' => $payment->status,
-                        'paid_at' => $payment->paid_at,
-                        'created_at' => $payment->created_at,
-                    ];
-                });
-
-            return response()->json($payments, 200);
+        $partnerStrict = PlatformTenantScope::partnerTenantIdStrict($request);
+        if ($partnerStrict === 0) {
+            return response()->json([], 200);
         }
+        $tenantId = $partnerStrict !== null ? $partnerStrict : PlatformTenantScope::resolveTenantId($request);
 
-        $payments = ApiListCache::remember('payments', 'admin_all', 120, function () {
+        // Partner tenant OR main hub (null = hub courses only — never all institutions).
+        $courseIds = PlatformTenantScope::tenantCourseIds($tenantId);
+        $cacheKey = $tenantId !== null ? 'inst_' . $tenantId : 'hub';
+
+        $payments = ApiListCache::remember('payments', $cacheKey, 120, function () use ($courseIds) {
             return CoursePayment::query()
+                ->whereIn('course_id', $courseIds ?: [-1])
                 ->with(['course:id,title,price', 'student:id,first_name,last_name,email,country'])
                 ->orderByDesc('id')
                 ->get()

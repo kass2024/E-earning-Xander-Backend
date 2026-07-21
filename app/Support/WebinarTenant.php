@@ -28,6 +28,16 @@ class WebinarTenant
     public static function fromRequest(Request $request): ?int
     {
         $actor = PlatformInstitutionHelper::resolveActorFromRequest($request);
+        if (!$actor) {
+            return null;
+        }
+
+        // Partner institution admins must never fall through to hub (null) scoping.
+        if (strtolower(trim((string) ($actor->role ?? ''))) === 'partner_company') {
+            $id = (int) ($actor->platform_institution_id ?? 0);
+
+            return $id > 0 ? $id : 0;
+        }
 
         return self::actorInstitutionId($actor);
     }
@@ -86,6 +96,11 @@ class WebinarTenant
             return $query;
         }
 
+        // Partner without a linked institution: empty result (never hub/all).
+        if ($institutionId === 0) {
+            return $query->whereRaw('1 = 0');
+        }
+
         if ($institutionId && $institutionId > 0) {
             return $query->where('platform_institution_id', $institutionId);
         }
@@ -103,6 +118,10 @@ class WebinarTenant
     {
         if (!Schema::hasColumn('available_schedules', 'platform_institution_id')) {
             return $query;
+        }
+
+        if ($institutionId === 0) {
+            return $query->whereRaw('1 = 0');
         }
 
         if ($institutionId && $institutionId > 0) {

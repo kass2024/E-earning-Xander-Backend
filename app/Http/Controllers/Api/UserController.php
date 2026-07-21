@@ -15,7 +15,11 @@ class UserController extends Controller
 {
     public function index(Request $request)
     {
-        $tenantId = PlatformTenantScope::resolveTenantId($request);
+        $partnerStrict = PlatformTenantScope::partnerTenantIdStrict($request);
+        if ($partnerStrict === 0) {
+            return response()->json([], 200);
+        }
+        $tenantId = $partnerStrict !== null ? $partnerStrict : PlatformTenantScope::resolveTenantId($request);
 
         if ($tenantId !== null) {
             $users = User::query()
@@ -28,9 +32,11 @@ class UserController extends Controller
             return response()->json($users, 200);
         }
 
-        $users = ApiListCache::remember('users', 'all', 120, function () {
+        // Main hub: hub-owned users only — never mix partner institutions.
+        $users = ApiListCache::remember('users', 'hub', 120, function () {
             return User::query()
                 ->select(['id', 'name', 'email', 'role', 'status', 'phone', 'platform_institution_id', 'created_at'])
+                ->whereNull('platform_institution_id')
                 ->with('platformInstitution:id,name,logo_path,logo_url,status,payment_status')
                 ->orderByDesc('id')
                 ->get();
@@ -41,7 +47,11 @@ class UserController extends Controller
 
     public function instructorsWithCourses(Request $request)
     {
-        $tenantId = PlatformTenantScope::resolveTenantId($request);
+        $partnerStrict = PlatformTenantScope::partnerTenantIdStrict($request);
+        if ($partnerStrict === 0) {
+            return response()->json([], 200);
+        }
+        $tenantId = $partnerStrict !== null ? $partnerStrict : PlatformTenantScope::resolveTenantId($request);
 
         if ($tenantId !== null) {
             $instructors = User::query()
@@ -55,11 +65,13 @@ class UserController extends Controller
             return response()->json($instructors, 200);
         }
 
-        $instructors = ApiListCache::remember('instructors', 'with_courses', 120, function () {
+        // Main hub instructors only.
+        $instructors = ApiListCache::remember('instructors', 'hub_with_courses', 120, function () {
             return User::query()
                 ->where('role', 'instructor')
-                ->select(['id', 'name', 'email', 'role', 'status', 'phone'])
-                ->with(['assignedCourses:id,title,status'])
+                ->whereNull('platform_institution_id')
+                ->select(['id', 'name', 'email', 'role', 'status', 'phone', 'platform_institution_id'])
+                ->with(['assignedCourses:id,title,status,platform_institution_id'])
                 ->orderByDesc('id')
                 ->get();
         });
