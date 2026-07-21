@@ -935,7 +935,6 @@ class InstructorDashboardController extends Controller
         }
 
         $details = CourseDetailsHelper::extractFromRequest($request);
-        $isPortalTeacher = InstructorLookup::isPortalTeacher($instructor);
         $payload = [
             'program_id' => $data['program_id'],
             'title' => $data['title'],
@@ -943,8 +942,8 @@ class InstructorDashboardController extends Controller
             'price' => $data['price'] ?? 0,
             'duration' => $data['duration'] ?? null,
             'requirements' => $data['requirements'] ?? null,
-            // Main admin / staff publish immediately; regular instructors need approval.
-            'status' => $isPortalTeacher ? 'Active' : 'Pending',
+            // Creator is auto-assigned below — publish Active so My Courses is usable immediately.
+            'status' => 'Active',
         ];
         CourseDetailsHelper::applyToPayload($payload, $details, $data['title']);
 
@@ -970,9 +969,7 @@ class InstructorDashboardController extends Controller
         $instructor->assignedCourses()->syncWithoutDetaching([$course->id]);
 
         return response()->json([
-            'message' => $isPortalTeacher
-                ? 'Course created and assigned to you.'
-                : 'Course submitted for admin approval.',
+            'message' => 'Course created and assigned to you.',
             'course' => $course,
         ], 201);
     }

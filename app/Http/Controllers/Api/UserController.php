@@ -93,6 +93,11 @@ class UserController extends Controller
             return response()->json(['message' => 'Instructor not found'], 404);
         }
 
+        // Instructor-created courses used to stay Pending after assignment — activate them so My Courses is usable.
+        $instructor->assignedCourses()
+            ->whereRaw("LOWER(TRIM(COALESCE(status, ''))) = 'pending'")
+            ->update(['status' => 'Active']);
+
         $instructor->load('assignedCourses');
 
         return response()->json([

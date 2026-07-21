@@ -8,14 +8,17 @@ use App\Models\CourseEnrollment;
 use App\Models\CourseMaterial;
 use App\Services\PCloudService;
 use App\Services\ZoomService;
+use App\Models\User;
 use App\Support\CourseDetailsHelper;
 use App\Support\CourseMaterialHelper;
 use App\Support\EnrollmentStatusHelper;
+use App\Support\InstructorLookup;
 use App\Support\LearnerRecordingAccess;
 use App\Support\MaterialFileHelper;
 use App\Support\PlatformTenantScope;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 
 class CourseMaterialController extends Controller
 {
@@ -32,11 +35,40 @@ class CourseMaterialController extends Controller
         return Course::query()->findOrFail((int) $material->course_id);
     }
 
+    /**
+     * Admins may view all tenant courses; uploads/deletes require assign_cours.
+     */
+    private function canMutateMaterials(?User $user, Course $course): bool
+    {
+        if (!$user || !InstructorLookup::isTeachable($user)) {
+            return false;
+        }
+
+        if (!PlatformTenantScope::userOwnsCourse($user, $course)) {
+            return false;
+        }
+
+        return $user->assignedCourses()->where('courses.id', $course->id)->exists();
+    }
+
+    private function assertCanMutateMaterials(Request $request, Course $course): void
+    {
+        PlatformTenantScope::assertCanAccess($request, $course);
+
+        $actor = PlatformTenantScope::resolveActorUser($request);
+        if (!$this->canMutateMaterials($actor, $course)) {
+            throw new AccessDeniedHttpException(
+                'You can view materials for this course, but uploads require the course to be assigned to you in Course Management.'
+            );
+        }
+    }
+
     public function index(Request $request, Course $course)
     {
         PlatformTenantScope::assertCanAccess($request, $course);
 
         $includeRecordings = $request->boolean('include_recordings');
+        $actor = PlatformTenantScope::resolveActorUser($request);
 
         return response()->json([
             'course' => [
@@ -44,6 +76,7 @@ class CourseMaterialController extends Controller
                 'title' => $course->title,
                 'description' => $course->description,
             ],
+            'can_upload' => $this->canMutateMaterials($actor, $course),
             'materials' => $this->buildCourseMaterialsPayload($course, $includeRecordings),
         ], 200);
     }
@@ -122,7 +155,7 @@ class CourseMaterialController extends Controller
 
         if ($includeRecordings) {
             $courseMeetingIds = $materials
-                ->filter(fn (CourseMaterial $m) => strtolower((string) $m->type) === 'zoom')
+                ->filter(fn (CourseMaterial $m) => CourseMaterialHelper::isLiveClassSession($m))
                 ->map(fn (CourseMaterial $m) => CourseMaterialHelper::meetingId($m))
                 ->filter()
                 ->reject(fn (?string $id) => LearnerRecordingAccess::isPathwaysWebinarMeeting($id))
@@ -184,7 +217,7 @@ class CourseMaterialController extends Controller
 
     public function store(Request $request, Course $course)
     {
-        PlatformTenantScope::assertCanAccess($request, $course);
+        $this->assertCanMutateMaterials($request, $course);
         $data = $request->validate([
             'title' => 'required|string|max:255',
             'description' => 'nullable|string',
@@ -208,7 +241,7 @@ class CourseMaterialController extends Controller
     public function update(Request $request, Course $course, CourseMaterial $material)
     {
         $ownedCourse = $this->materialCourse($course, $material);
-        PlatformTenantScope::assertCanAccess($request, $ownedCourse);
+        $this->assertCanMutateMaterials($request, $ownedCourse);
 
         $data = $request->validate([
             'title' => 'sometimes|required|string|max:255',
@@ -230,7 +263,7 @@ class CourseMaterialController extends Controller
     public function destroy(Request $request, Course $course, CourseMaterial $material)
     {
         $ownedCourse = $this->materialCourse($course, $material);
-        PlatformTenantScope::assertCanAccess($request, $ownedCourse);
+        $this->assertCanMutateMaterials($request, $ownedCourse);
 
         $meta = is_array($material->metadata) ? $material->metadata : [];
         $fileId = MaterialFileHelper::pcloudFileId($meta);
@@ -255,8 +288,10 @@ class CourseMaterialController extends Controller
     /**
      * Returns folder + upload credentials so the browser sends files straight to pCloud.
      */
-    public function prepareDirectUpload(Course $course, PCloudService $pcloud)
+    public function prepareDirectUpload(Request $request, Course $course, PCloudService $pcloud)
     {
+        $this->assertCanMutateMaterials($request, $course);
+
         if (!$pcloud->isConfigured()) {
             return response()->json([
                 'message' => 'pCloud is not configured. Set PCLOUD_ACCESS_TOKEN in the server .env file.',
@@ -279,6 +314,8 @@ class CourseMaterialController extends Controller
      */
     public function registerDirectUpload(Request $request, Course $course, PCloudService $pcloud)
     {
+        $this->assertCanMutateMaterials($request, $course);
+
         if (!$pcloud->isConfigured()) {
             return response()->json([
                 'message' => 'pCloud is not configured. Set PCLOUD_ACCESS_TOKEN in the server .env file.',
@@ -324,7 +361,7 @@ class CourseMaterialController extends Controller
 
     public function uploadPCloud(Request $request, Course $course, PCloudService $pcloud)
     {
-        PlatformTenantScope::assertCanAccess($request, $course);
+        $this->assertCanMutateMaterials($request, $course);
 
         if (!$pcloud->isConfigured()) {
             return response()->json([

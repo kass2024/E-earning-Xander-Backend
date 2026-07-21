@@ -125,10 +125,18 @@ class CourseController extends Controller
 
         $course = Course::create($payload);
 
+        // Auto-assign the creating teachable actor (admin / partner / instructor).
+        $actor = PlatformTenantScope::resolveActorUser($request);
+        if ($actor && InstructorLookup::isTeachable($actor)) {
+            $actor->assignedCourses()->syncWithoutDetaching([$course->id]);
+        }
+
         $this->bumpCourseCaches();
 
         return response()->json([
-            'message' => 'Course created. Use Assign to link a teacher when ready.',
+            'message' => $actor && InstructorLookup::isTeachable($actor)
+                ? 'Course created and assigned to you.'
+                : 'Course created. Use Assign to link a teacher when ready.',
             'course' => $course->load('instructors:id,name,email,role'),
         ], 201);
     }
