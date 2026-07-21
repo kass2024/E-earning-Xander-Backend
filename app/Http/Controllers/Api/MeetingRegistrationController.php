@@ -608,20 +608,22 @@ class MeetingRegistrationController extends Controller
         return $startAt->copy()->utc()->format('Y-m-d H:i');
     }
 
-    private function meetingSlotIsTaken(Carbon $startAt): bool
+    private function meetingSlotIsTaken(Carbon $startAt, ?int $institutionId = null): bool
     {
         if (!Schema::hasColumn('meeting_registrations', 'zoom_start_time')) {
             return false;
         }
 
-        return MeetingRegistration::query()
+        $query = MeetingRegistration::query()
             ->where('zoom_start_time', $startAt->toDateTimeString())
             ->where(function ($q) {
                 $q->whereNull('status')
                     ->orWhereRaw("LOWER(COALESCE(status, 'pending')) = 'approved'")
                     ->orWhereRaw("LOWER(COALESCE(status, 'pending')) = 'pending'");
-            })
-            ->exists();
+            });
+        WebinarTenant::scopeRegistrations($query, $institutionId);
+
+        return $query->exists();
     }
 
     /**
@@ -1185,6 +1187,7 @@ class MeetingRegistrationController extends Controller
             'available_schedule_id' => 'required|exists:available_schedules,id',
             'schedule_label' => 'nullable|string',
             'meeting_at' => 'nullable|date',
+            'platform_institution_id' => 'nullable|integer|min:1',
         ]);
 
         $scheduleLabelFromForm = $data['schedule_label'] ?? null;
@@ -1193,15 +1196,43 @@ class MeetingRegistrationController extends Controller
         if (!empty($data['available_schedule_id'])) {
             $schedule = AvailableSchedule::query()->find($data['available_schedule_id']);
         }
+        if (!$schedule) {
+            throw ValidationException::withMessages([
+                'available_schedule_id' => ['The selected schedule could not be found.'],
+            ]);
+        }
+
+        $scheduleInstitutionId = WebinarTenant::fromSchedule($schedule);
+        $requestedInstitutionId = isset($data['platform_institution_id'])
+            ? (int) $data['platform_institution_id']
+            : null;
+
+        // Keep hub and institution booking calendars fully independent.
+        if ($requestedInstitutionId && $requestedInstitutionId > 0) {
+            if ($scheduleInstitutionId !== $requestedInstitutionId) {
+                throw ValidationException::withMessages([
+                    'available_schedule_id' => ['This time slot is not available for this institution.'],
+                ]);
+            }
+            $tenantInstitutionId = $requestedInstitutionId;
+        } else {
+            if ($scheduleInstitutionId) {
+                throw ValidationException::withMessages([
+                    'available_schedule_id' => ['This time slot belongs to an institution portal, not the main platform.'],
+                ]);
+            }
+            $tenantInstitutionId = null;
+        }
+
         $startAt = $this->resolveMeetingStartAt($schedule, $data['meeting_at'] ?? null);
 
-        if ($this->meetingSlotIsTaken($startAt)) {
+        if ($this->meetingSlotIsTaken($startAt, $tenantInstitutionId)) {
             throw ValidationException::withMessages([
                 'meeting_at' => ['This time slot is no longer available. Please choose another time.'],
             ]);
         }
 
-        return DB::transaction(function () use ($data, $scheduleLabelFromForm, $schedule, $startAt) {
+        return DB::transaction(function () use ($data, $scheduleLabelFromForm, $schedule, $startAt, $tenantInstitutionId) {
             $user = User::where('email', $data['email'])->first();
 
             $hasPhone = Schema::hasColumn('users', 'phone');
@@ -1257,9 +1288,8 @@ class MeetingRegistrationController extends Controller
                 'notes' => $data['notes'] ?? null,
             ];
 
-            $scheduleInstitutionId = WebinarTenant::fromSchedule($schedule);
             if (Schema::hasColumn('meeting_registrations', 'platform_institution_id')) {
-                $createRegistration['platform_institution_id'] = $scheduleInstitutionId;
+                $createRegistration['platform_institution_id'] = $tenantInstitutionId;
             }
 
             // Auto-approve on registration; Zoom + confirmation email run after the HTTP response.

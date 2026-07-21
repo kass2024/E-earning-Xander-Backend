@@ -20,20 +20,24 @@ class AvailableScheduleController extends Controller
 
     private function resolveInstitutionId(Request $request): ?int
     {
-        // Prefer explicit tenant from public booking / portal query so schedules match admin settings
-        // even when a logged-in actor (or stale user_email) is also present.
+        $actor = PlatformInstitutionHelper::resolveActorFromRequest($request);
+
+        // Partners are always locked to their own institution (never hub / never another tenant).
+        if ($actor && strtolower(trim((string) ($actor->role ?? ''))) === 'partner_company') {
+            $id = (int) ($actor->platform_institution_id ?? 0);
+            if ($id > 0) {
+                return $id;
+            }
+
+            return 0;
+        }
+
+        // Public institution booking pages pass this explicitly (even if a hub admin is browsing).
         if ($request->filled('platform_institution_id')) {
             $requested = (int) $request->input('platform_institution_id');
             if ($requested > 0) {
                 return $requested;
             }
-        }
-
-        $actor = PlatformInstitutionHelper::resolveActorFromRequest($request);
-        if ($actor && strtolower(trim((string) ($actor->role ?? ''))) === 'partner_company') {
-            $id = (int) ($actor->platform_institution_id ?? 0);
-
-            return $id > 0 ? $id : 0;
         }
 
         return WebinarTenant::actorInstitutionId($actor);
@@ -44,8 +48,31 @@ class AvailableScheduleController extends Controller
         $actor = PlatformInstitutionHelper::resolveActorFromRequest($request) ?: $request->user();
         if ($actor && strtolower(trim((string) ($actor->role ?? ''))) === 'partner_company') {
             $id = (int) ($actor->platform_institution_id ?? 0);
+            if ($id > 0) {
+                return $id;
+            }
 
-            return $id > 0 ? $id : 0;
+            // Heal unlinked partner sessions that still send the institution id from the client.
+            $requested = (int) $request->input('platform_institution_id', 0);
+            if ($requested > 0) {
+                $owns = \App\Models\PlatformInstitution::query()
+                    ->where('id', $requested)
+                    ->where(function ($q) use ($actor) {
+                        $q->where('owner_user_id', $actor->id)
+                            ->orWhereRaw('LOWER(TRIM(contact_email)) = ?', [
+                                strtolower(trim((string) ($actor->email ?? ''))),
+                            ]);
+                    })
+                    ->exists();
+                if ($owns) {
+                    $actor->platform_institution_id = $requested;
+                    $actor->save();
+
+                    return $requested;
+                }
+            }
+
+            return 0;
         }
 
         return WebinarTenant::actorInstitutionId($actor instanceof \App\Models\User ? $actor : null);
