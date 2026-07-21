@@ -53,6 +53,15 @@ class UserController extends Controller
         }
         $tenantId = $partnerStrict !== null ? $partnerStrict : PlatformTenantScope::resolveTenantId($request);
 
+        // Heal older rows: assigned courses left as Pending after create/assign.
+        $healed = \App\Models\Course::query()
+            ->whereRaw("LOWER(TRIM(COALESCE(status, ''))) = 'pending'")
+            ->whereHas('instructors')
+            ->update(['status' => 'Active']);
+        if ($healed > 0) {
+            ApiListCache::bump('courses');
+            ApiListCache::bump('instructors');
+        }
         if ($tenantId !== null) {
             $instructors = User::query()
                 ->where('role', 'instructor')

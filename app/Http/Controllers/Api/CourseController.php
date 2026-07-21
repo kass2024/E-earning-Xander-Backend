@@ -53,6 +53,16 @@ class CourseController extends Controller
     }
     public function index(Request $request)
     {
+        // Assigned courses should not remain Pending in Manage Courses lists.
+        $healed = Course::query()
+            ->whereRaw("LOWER(TRIM(COALESCE(status, ''))) = 'pending'")
+            ->whereHas('instructors')
+            ->update(['status' => 'Active']);
+        if ($healed > 0) {
+            ApiListCache::bump('courses');
+            ApiListCache::bump('instructors');
+        }
+
         $programId = $request->query('program_id');
         $tenantId = PlatformTenantScope::resolveTenantId($request);
         $cacheKey = 'owned_' . ($tenantId !== null ? 'inst_' . $tenantId : 'hub')
@@ -104,6 +114,12 @@ class CourseController extends Controller
 
         $details = CourseDetailsHelper::extractFromRequest($request);
 
+        // New courses go live as Active (ignore client "Pending") so assign + My Courses work immediately.
+        $requestedStatus = trim((string) ($data['status'] ?? 'Active'));
+        $status = strcasecmp($requestedStatus, 'Pending') === 0 || $requestedStatus === ''
+            ? 'Active'
+            : $requestedStatus;
+
         $payload = [
             'program_id' => $data['program_id'],
             'title' => $data['title'],
@@ -111,7 +127,7 @@ class CourseController extends Controller
             'price' => $data['price'] ?? null,
             'duration' => $data['duration'] ?? null,
             'requirements' => $data['requirements'] ?? null,
-            'status' => $data['status'] ?? 'Active',
+            'status' => $status,
         ];
 
         CourseDetailsHelper::applyToPayload($payload, $details, $data['title']);
@@ -129,6 +145,10 @@ class CourseController extends Controller
         $actor = PlatformTenantScope::resolveActorUser($request);
         if ($actor && InstructorLookup::isTeachable($actor)) {
             $actor->assignedCourses()->syncWithoutDetaching([$course->id]);
+            if (strcasecmp((string) $course->status, 'Pending') === 0) {
+                $course->status = 'Active';
+                $course->save();
+            }
         }
 
         $this->bumpCourseCaches();
@@ -214,10 +234,17 @@ class CourseController extends Controller
 
         $user->assignedCourses()->syncWithoutDetaching([$course->id]);
 
+        // Assigned courses must be Active (Manage Courses / My Courses were stuck on Pending).
+        if (strcasecmp(trim((string) ($course->status ?? '')), 'Pending') === 0) {
+            $course->status = 'Active';
+            $course->save();
+        }
+
         $this->bumpCourseCaches();
 
         return response()->json([
             'message' => 'Course assigned to teacher',
+            'course' => $course->fresh(['instructors:id,name,email,role']),
         ]);
     }
 
