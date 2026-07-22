@@ -5,38 +5,36 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class CoursePayment extends Model
+class ExternalCoursePayment extends Model
 {
     protected $fillable = [
         'course_id',
-        'student_id',
-        'amount_cents',
+        'course_title',
+        'course_price_rwf',
+        'amount_rwf',
         'currency',
-        'provider',
-        'stripe_session_id',
-        'stripe_payment_intent_id',
-        'external_reference',
+        'payer_name',
+        'payer_email',
+        'payer_phone',
         'msisdn',
-        'proof_path',
-        'proof_note',
-        'promo_code',
+        'mno',
+        'external_reference',
+        'provider',
         'status',
+        'receipt_path',
+        'receipt_emailed',
         'metadata',
         'paid_at',
     ];
 
     protected $casts = [
         'metadata' => 'array',
+        'receipt_emailed' => 'boolean',
         'paid_at' => 'datetime',
     ];
 
     public function course(): BelongsTo
     {
         return $this->belongsTo(Course::class);
-    }
-
-    public function student(): BelongsTo
-    {
-        return $this->belongsTo(Student::class);
     }
 }

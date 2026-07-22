@@ -22,6 +22,7 @@ class PlatformInstitution extends Model
         'portal_features', 'portal_hero_image_path', 'portal_cta_label',
         'zoom_host_user_id',
         'meeting_provider',
+        'momo_receiver_phone', 'momo_receiver_name', 'momo_whatsapp_phone',
     ];
 
     protected $hidden = [

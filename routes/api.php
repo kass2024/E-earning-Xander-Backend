@@ -100,6 +100,13 @@ Route::prefix('admin')->group(function () {
     Route::put('site-settings/promo-banner', [PromoBannerController::class, 'update']);
     Route::get('site-settings/star-promo-banner', [StarPromoBannerController::class, 'show']);
     Route::put('site-settings/star-promo-banner', [StarPromoBannerController::class, 'update']);
+    Route::get('site-settings/payment-receiver', [\App\Http\Controllers\Api\PaymentSettingsController::class, 'show']);
+    Route::put('site-settings/payment-receiver', [\App\Http\Controllers\Api\PaymentSettingsController::class, 'update']);
+
+    // Public guest Pay Now (MoMo, no enrollment)
+    Route::get('public/pay-now/courses', [\App\Http\Controllers\Api\ExternalPayNowController::class, 'courses']);
+    Route::post('public/pay-now/request', [\App\Http\Controllers\Api\ExternalPayNowController::class, 'request']);
+    Route::get('public/pay-now/status/{reference}', [\App\Http\Controllers\Api\ExternalPayNowController::class, 'status']);
 
     // Study shifts (learner registration)
     Route::get('study-shifts', [StudyShiftController::class, 'index']);
@@ -345,11 +352,21 @@ Route::prefix('admin')->group(function () {
 
     /*** ---------------- PAYMENTS ---------------- ***/
     Route::get('payments', [PaymentController::class, 'index']);
+    Route::get('payments/config', [PaymentController::class, 'paymentConfig']);
     Route::get('payments/stripe-config', [PaymentController::class, 'stripeConfig']);
+    Route::get('course-promo-codes', [PaymentController::class, 'promoCodes']);
+    Route::post('course-promo-codes', [PaymentController::class, 'storePromoCode']);
+    Route::patch('course-promo-codes/{coursePromoCode}', [PaymentController::class, 'updatePromoCode']);
     Route::patch('payments/{payment}', [PaymentController::class, 'updateStatus']);
     Route::post('payments/create-checkout', [PaymentController::class, 'createCheckout']);
     Route::post('payments/confirm-checkout', [PaymentController::class, 'confirmCheckout']);
     Route::post('payments/create-intent', [PaymentController::class, 'createIntent']);
+    Route::post('payments/momo/request', [PaymentController::class, 'requestMomo']);
+    Route::get('payments/momo/status/{reference}', [PaymentController::class, 'momoStatus']);
+    Route::post('payments/promo/apply', [PaymentController::class, 'applyPromo']);
+    Route::post('payments/proof/submit', [PaymentController::class, 'submitProof']);
+    Route::post('payments/mopay/register-callbacks', [PaymentController::class, 'registerMopayCallbacks']);
+    Route::match(['get', 'post'], 'payments/mopay/webhook', [PaymentController::class, 'mopayWebhook']);
 
     /*** ---------------- ZOOM ---------------- ***/
     Route::get('zoom/meetings', [ZoomController::class, 'listMeetings']);
