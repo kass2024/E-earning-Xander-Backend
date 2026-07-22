@@ -35,6 +35,7 @@ class ExternalPayNowService
 
         return Course::query()
             ->where('price', '>', 0)
+            ->whereNull('platform_institution_id')
             ->orderBy('title')
             ->get(['id', 'title', 'price', 'duration', 'description', 'status', 'platform_institution_id'])
             ->map(function (Course $c) use ($currency, $resolver) {
@@ -82,6 +83,11 @@ class ExternalPayNowService
         $course = Course::find($courseId);
         if (!$course) {
             return ['ok' => false, 'status' => 404, 'message' => 'Course not found.'];
+        }
+
+        // Main-platform Pay Now never accepts partner-institution courses.
+        if (!empty($course->platform_institution_id)) {
+            return ['ok' => false, 'status' => 403, 'message' => 'This course belongs to another institution.'];
         }
 
         $max = (int) max(0, round((float) ($course->price ?? 0)));

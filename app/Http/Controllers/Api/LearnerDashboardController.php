@@ -82,7 +82,18 @@ class LearnerDashboardController extends Controller
 
             ->orderByDesc('updated_at')
 
-            ->get();
+            ->get()
+
+            ->filter(function (CourseEnrollment $enrollment) use ($student) {
+                $course = $enrollment->course;
+                if (!$course) {
+                    return false;
+                }
+
+                return PlatformTenantScope::studentCanAccessCourse($student, $course);
+            })
+
+            ->values();
 
         $shiftService = app(\App\Services\EnrollmentStudyShiftService::class);
 
@@ -520,7 +531,7 @@ class LearnerDashboardController extends Controller
 
                 ->whereIn('course_id', $paidCourseIds)
 
-                ->where('type', 'zoom')
+                ->whereIn('type', ['zoom', 'daily'])
 
                 ->orderByDesc('scheduled_at')
 
@@ -631,7 +642,7 @@ class LearnerDashboardController extends Controller
 
             ->whereIn('course_id', $paidCourseIds)
 
-            ->where('type', 'zoom')
+            ->whereIn('type', ['zoom', 'daily'])
 
             ->where('created_at', '>=', now()->subDays(14))
 

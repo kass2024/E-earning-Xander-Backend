@@ -10,6 +10,7 @@ use App\Models\StudyShiftChangeRequest;
 use App\Models\User;
 use App\Services\EnrollmentStudyShiftService;
 use App\Support\ApiListCache;
+use App\Support\PlatformTenantScope;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -85,6 +86,11 @@ class StudyShiftChangeRequestController extends Controller
         }
 
         $course = $enrollment->course ?? Course::find($data['course_id']);
+        $student = $enrollment->student ?? \App\Models\Student::find($data['student_id']);
+        if ($course && $student) {
+            PlatformTenantScope::assertStudentCanAccessCourse($student, $course);
+        }
+
         $resolved = $this->shifts->resolveStudyShiftsForCourse(
             $course,
             $data['study_shift_ids'],

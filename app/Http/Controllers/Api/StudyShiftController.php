@@ -38,10 +38,15 @@ class StudyShiftController extends Controller
                 return response()->json(['study_shifts' => []], 200);
             }
 
-            $institutionId = $request->query('platform_institution_id');
-            $institutionId = $institutionId !== null && $institutionId !== ''
-                ? (int) $institutionId
-                : ($course->platform_institution_id ? (int) $course->platform_institution_id : null);
+            $denied = $this->denyForeignCourseShifts($request, $course);
+            if ($denied !== null) {
+                return $denied;
+            }
+
+            // Always derive institution from the course — never trust a client override to cross tenants.
+            $institutionId = $course->platform_institution_id
+                ? (int) $course->platform_institution_id
+                : null;
 
             $cacheKey = 'course_' . (int) $courseId . '_active'
                 . ($institutionId ? '_inst_' . $institutionId : '')
@@ -81,7 +86,29 @@ class StudyShiftController extends Controller
             }
 
             if ($this->isPlatformAdmin($actor)) {
-                // Platform admin sees every shift.
+                // Hub admin: hub shifts only unless explicitly operating in a partner tenant.
+                $tenantId = PlatformTenantScope::resolveTenantId($request);
+                if ($tenantId === null) {
+                    $hubCourseIds = PlatformTenantScope::tenantCourseIds(null);
+                    $query->where(function ($q) use ($hubCourseIds) {
+                        $q->whereNull('platform_institution_id');
+                        if (!empty($hubCourseIds)) {
+                            $q->orWhereIn('course_id', $hubCourseIds)
+                                ->orWhereHas('courses', fn ($sub) => $sub->whereIn('courses.id', $hubCourseIds));
+                        } else {
+                            $q->orWhereNull('course_id');
+                        }
+                    });
+                } else {
+                    $courseIds = PlatformTenantScope::tenantCourseIds($tenantId);
+                    $query->where(function ($q) use ($tenantId, $courseIds) {
+                        $q->where('platform_institution_id', $tenantId);
+                        if (!empty($courseIds)) {
+                            $q->orWhereIn('course_id', $courseIds)
+                                ->orWhereHas('courses', fn ($sub) => $sub->whereIn('courses.id', $courseIds));
+                        }
+                    });
+                }
             } elseif ($this->isPartnerAdmin($actor)) {
                 $tenantId = (int) $actor->platform_institution_id;
                 $courseIds = PlatformTenantScope::tenantCourseIds($tenantId);
@@ -403,6 +430,44 @@ class StudyShiftController extends Controller
     {
         return in_array(strtolower((string) $user->role), ['admin', 'superadmin', 'staff'], true)
             && empty($user->platform_institution_id);
+    }
+
+    /**
+     * Block cross-tenant study-shift listings. Returns a JSON response when denied, else null.
+     */
+    private function denyForeignCourseShifts(Request $request, Course $course): ?\Illuminate\Http\JsonResponse
+    {
+        $forbidden = function (string $message = 'This course belongs to another institution.') {
+            return response()->json(['study_shifts' => [], 'message' => $message], 403);
+        };
+
+        try {
+            $actor = $this->resolveActor($request);
+            if ($actor && ($this->isPartnerAdmin($actor) || $this->isInstructor($actor))) {
+                PlatformTenantScope::assertUserOwnsCourse($actor, $course);
+
+                return null;
+            }
+
+            if ($actor && $this->isPlatformAdmin($actor)) {
+                PlatformTenantScope::assertCanAccess($request, $course);
+
+                return null;
+            }
+
+            $student = PlatformTenantScope::resolveStudentFromRequest($request);
+            if ($student) {
+                PlatformTenantScope::assertStudentCanAccessCourse($student, $course);
+
+                return null;
+            }
+
+            PlatformTenantScope::assertCanAccess($request, $course);
+        } catch (\Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException $e) {
+            return $forbidden($e->getMessage());
+        }
+
+        return null;
     }
 
     private function isPartnerAdmin(User $user): bool

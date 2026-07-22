@@ -60,16 +60,20 @@ class PlatformTenantScope
         }
 
         $explicit = $request->input('platform_institution_id') ?? $request->query('platform_institution_id');
+        $user = self::resolveActorUser($request);
+
         if ($explicit !== null && $explicit !== '') {
-            $user = self::resolveActorUser($request);
-            // Only authenticated main platform admins may switch into a partner tenant context.
-            // Never accept a bare client institution id without a resolved actor.
+            // Main admins may switch into a partner tenant for oversight.
             if ($user && PlatformInstitutionHelper::isMainPlatformAdmin($user)) {
+                return (int) $explicit;
+            }
+            // Public signup / guest catalog may request one institution's courses only.
+            // Never mix tenants: explicit id scopes to that partner; omit for hub-only.
+            if (!$user) {
                 return (int) $explicit;
             }
         }
 
-        $user = self::resolveActorUser($request);
         if (!$user) {
             return null;
         }
@@ -83,6 +87,71 @@ class PlatformTenantScope
         }
 
         return null;
+    }
+
+    public static function resolveStudentFromRequest(Request $request): ?Student
+    {
+        $studentId = $request->input('student_id') ?? $request->query('student_id');
+        if ($studentId !== null && $studentId !== '') {
+            return Student::query()->find((int) $studentId);
+        }
+
+        $email = self::resolveActorEmail($request);
+        if ($email === '') {
+            return null;
+        }
+
+        return Student::query()
+            ->whereRaw('LOWER(TRIM(email)) = ?', [$email])
+            ->first();
+    }
+
+    /**
+     * Course/program catalog for the caller.
+     * Learners are always scoped by Student.platform_institution_id (never User alone),
+     * so hub accounts never see partner courses and partners never see hub/other tenants.
+     *
+     * @param  Builder<Model>|Relation  $query
+     * @return Builder<Model>|Relation
+     */
+    public static function applyCatalogForRequest(
+        Builder|Relation $query,
+        Request $request,
+        string $column = 'platform_institution_id',
+    ): Builder|Relation {
+        $user = self::resolveActorUser($request);
+        $role = $user ? strtolower(trim((string) ($user->role ?? ''))) : '';
+
+        if ($user && in_array($role, ['admin', 'staff', 'partner_company', 'instructor'], true)) {
+            return self::applyToQuery($query, $request, $column);
+        }
+
+        $student = self::resolveStudentFromRequest($request);
+        if ($student || $request->filled('student_id') || in_array($role, ['learner', 'student'], true)) {
+            return self::applyStudentCatalogScope($query, $student, $column);
+        }
+
+        return self::applyToQuery($query, $request, $column);
+    }
+
+    /** Cache / log key fragment for the active catalog tenant. */
+    public static function catalogCacheTenantKey(Request $request): string
+    {
+        $user = self::resolveActorUser($request);
+        $role = $user ? strtolower(trim((string) ($user->role ?? ''))) : '';
+
+        if ($user && in_array($role, ['admin', 'staff', 'partner_company', 'instructor'], true)) {
+            $tenantId = self::resolveTenantId($request);
+
+            return $tenantId !== null ? 'inst_' . $tenantId : 'hub';
+        }
+
+        $student = self::resolveStudentFromRequest($request);
+        $studentTenant = $student && !empty($student->platform_institution_id)
+            ? (int) $student->platform_institution_id
+            : null;
+
+        return $studentTenant !== null ? 'student_inst_' . $studentTenant : 'student_hub';
     }
 
     public static function isPartnerRequest(Request $request): bool

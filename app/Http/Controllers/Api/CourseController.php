@@ -64,8 +64,7 @@ class CourseController extends Controller
         }
 
         $programId = $request->query('program_id');
-        $tenantId = PlatformTenantScope::resolveTenantId($request);
-        $cacheKey = 'owned_' . ($tenantId !== null ? 'inst_' . $tenantId : 'hub')
+        $cacheKey = 'owned_' . PlatformTenantScope::catalogCacheTenantKey($request)
             . ($programId ? '_program_' . $programId : '_all');
 
         $courses = ApiListCache::remember('courses', $cacheKey, 120, function () use ($request, $programId) {
@@ -73,7 +72,7 @@ class CourseController extends Controller
                 'program:id,name',
                 'instructors:id,name,email,role',
             ])->orderByDesc('id');
-            PlatformTenantScope::applyToQuery($query, $request);
+            PlatformTenantScope::applyCatalogForRequest($query, $request);
 
             if ($programId) {
                 $query->where('program_id', $programId);
@@ -919,9 +918,18 @@ class CourseController extends Controller
 
     public function studentEnrollments(Student $student)
     {
-        $enrollments = CourseEnrollment::with(['studyShifts', 'course:id,title,price'])
+        $enrollments = CourseEnrollment::with(['studyShifts', 'course:id,title,price,platform_institution_id'])
             ->where('student_id', $student->id)
-            ->get();
+            ->get()
+            ->filter(function (CourseEnrollment $enrollment) use ($student) {
+                $course = $enrollment->course;
+                if (!$course) {
+                    return false;
+                }
+
+                return PlatformTenantScope::studentCanAccessCourse($student, $course);
+            })
+            ->values();
 
         return response()->json([
             'enrollments' => $enrollments->map(
