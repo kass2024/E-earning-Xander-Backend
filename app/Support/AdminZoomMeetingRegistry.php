@@ -13,10 +13,22 @@ class AdminZoomMeetingRegistry
      * @param  list<array<string, mixed>>  $zoomMeetings
      * @return list<array<string, mixed>>
      */
-    public static function meetingsForManagementPage(array $zoomMeetings, ?int $actorInstitutionId = null, bool $isMainAdmin = true): array
+    public static function meetingsForManagementPage(
+        array $zoomMeetings,
+        ?int $actorInstitutionId = null,
+        bool $isMainAdmin = true,
+        ?int $createdByUserId = null,
+        bool $ownMeetingsOnly = false,
+    ): array
     {
         if (self::tableReady() && AdminZoomMeeting::query()->exists()) {
-            return self::mergeWithZoomList($zoomMeetings, $actorInstitutionId, $isMainAdmin);
+            return self::mergeWithZoomList(
+                $zoomMeetings,
+                $actorInstitutionId,
+                $isMainAdmin,
+                $createdByUserId,
+                $ownMeetingsOnly,
+            );
         }
 
         return self::excludePlatformMeetings($zoomMeetings);
@@ -26,7 +38,13 @@ class AdminZoomMeetingRegistry
      * @param  list<array<string, mixed>>  $zoomMeetings
      * @return list<array<string, mixed>>
      */
-    public static function mergeWithZoomList(array $zoomMeetings, ?int $actorInstitutionId = null, bool $isMainAdmin = true): array
+    public static function mergeWithZoomList(
+        array $zoomMeetings,
+        ?int $actorInstitutionId = null,
+        bool $isMainAdmin = true,
+        ?int $createdByUserId = null,
+        bool $ownMeetingsOnly = false,
+    ): array
     {
         if (!self::tableReady()) {
             return [];
@@ -36,7 +54,16 @@ class AdminZoomMeetingRegistry
             ->orderByDesc('start_time')
             ->orderByDesc('id');
 
-        if (Schema::hasColumn('admin_zoom_meetings', 'platform_institution_id')) {
+        if ($ownMeetingsOnly && $createdByUserId) {
+            $query->where('created_by_user_id', $createdByUserId);
+            if (Schema::hasColumn('admin_zoom_meetings', 'platform_institution_id')) {
+                if ($actorInstitutionId && $actorInstitutionId > 0) {
+                    $query->where('platform_institution_id', $actorInstitutionId);
+                } else {
+                    $query->whereNull('platform_institution_id');
+                }
+            }
+        } elseif (Schema::hasColumn('admin_zoom_meetings', 'platform_institution_id')) {
             if ($isMainAdmin) {
                 // Hub operators see hub meetings (null institution) only.
                 $query->whereNull('platform_institution_id');

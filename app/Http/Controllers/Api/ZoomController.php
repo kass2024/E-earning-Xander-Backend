@@ -65,6 +65,8 @@ class ZoomController extends Controller
             $zoomMeetings,
             $tenant['institutionId'],
             $tenant['isMainAdmin'],
+            $tenant['actor']->id ? (int) $tenant['actor']->id : null,
+            $this->actorIsInstructor($tenant['actor']),
         );
         $meetings = $this->zoom->annotateMeetingSessionStatuses($meetings, $hostUser);
 
@@ -506,7 +508,13 @@ class ZoomController extends Controller
             if ($isMain && $meetingInstitutionId) {
                 return response()->json(['message' => 'Hub operators can only delete hub meetings.'], 403);
             }
-            if (!$isMain && $meetingInstitutionId !== $actorInstitutionId) {
+            if ($actor instanceof User && $this->actorIsInstructor($actor)) {
+                $ownerId = (int) ($adminMeeting->created_by_user_id ?? 0);
+                $actorId = $actor->id ? (int) $actor->id : 0;
+                if (!$actorId || $ownerId !== $actorId) {
+                    return response()->json(['message' => 'Not allowed to delete this meeting.'], 403);
+                }
+            } elseif (!$isMain && $meetingInstitutionId !== $actorInstitutionId) {
                 return response()->json(['message' => 'Not allowed to delete this meeting.'], 403);
             }
 
@@ -699,8 +707,10 @@ class ZoomController extends Controller
             $institutionId = (int) $actor->platform_institution_id;
         }
 
-        // Partner must have an institution — otherwise they see nothing (never hub).
-        if (!$isMainAdmin && (!$institutionId || $institutionId <= 0)) {
+        // Partner without an institution: empty tenant (never hub).
+        // Hub instructors (no institution) still get actor so they can host their own meetings.
+        $role = strtolower(trim((string) ($actor->role ?? '')));
+        if (!$isMainAdmin && (!$institutionId || $institutionId <= 0) && $role === 'partner_company') {
             return ['actor' => $actor, 'institutionId' => null, 'isMainAdmin' => false];
         }
 
@@ -709,6 +719,15 @@ class ZoomController extends Controller
             'institutionId' => $isMainAdmin ? null : $institutionId,
             'isMainAdmin' => $isMainAdmin,
         ];
+    }
+
+    private function actorIsInstructor(?User $actor): bool
+    {
+        if (!$actor) {
+            return false;
+        }
+
+        return strtolower(trim((string) ($actor->role ?? ''))) === 'instructor';
     }
 }
 
