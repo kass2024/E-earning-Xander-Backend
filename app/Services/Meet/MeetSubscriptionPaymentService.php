@@ -211,14 +211,33 @@ class MeetSubscriptionPaymentService
             return ['ok' => false, 'status' => 401];
         }
 
-        $transactionId = (string) ($payload['transactionId'] ?? $payload['transaction_id'] ?? '');
+        $data = $payload['data'] ?? null;
+        if (is_string($data) && str_starts_with(ltrim($data), '{')) {
+            $decoded = json_decode($data, true);
+            if (is_array($decoded)) {
+                $data = $decoded;
+            }
+        }
+
+        $transactionId = is_array($data)
+            ? (string) ($data['transactionId'] ?? $data['referenceId'] ?? $data['transaction_id'] ?? '')
+            : '';
         if ($transactionId === '') {
-            return ['ok' => false, 'status' => 400];
+            $transactionId = (string) ($payload['transactionId'] ?? $payload['transaction_id'] ?? '');
+        }
+
+        if ($transactionId === '') {
+            return ['ok' => false, 'status' => 400, 'message' => 'Missing transaction id'];
         }
 
         $payment = MeetSubscriptionPayment::where('external_reference', $transactionId)->first();
         if (!$payment) {
-            return ['ok' => false, 'status' => 404];
+            $baseRef = preg_replace('/_T$/', '', $transactionId) ?: $transactionId;
+            $payment = MeetSubscriptionPayment::where('external_reference', $baseRef)->first();
+        }
+
+        if (!$payment) {
+            return ['ok' => false, 'status' => 404, 'message' => 'Transaction not found'];
         }
 
         if ($this->mopay->isSettledSuccess($payload)) {

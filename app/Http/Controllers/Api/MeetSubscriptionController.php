@@ -153,7 +153,10 @@ class MeetSubscriptionController extends Controller
         $result = $this->payments->handleMopayWebhook($body);
         $httpStatus = is_int($result['status'] ?? null) ? $result['status'] : 200;
 
-        return response()->json(['status' => $httpStatus, 'received' => true], $httpStatus >= 400 ? $httpStatus : 200);
+        return response()->json([
+            'status' => $httpStatus,
+            'message' => $result['message'] ?? 'received',
+        ], $httpStatus >= 400 ? $httpStatus : 200);
     }
 
     public function adminConsumption(Request $request): JsonResponse
