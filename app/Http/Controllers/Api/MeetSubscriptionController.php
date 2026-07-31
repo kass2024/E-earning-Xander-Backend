@@ -141,11 +141,19 @@ class MeetSubscriptionController extends Controller
 
     public function mopayWebhook(Request $request): JsonResponse
     {
-        $body = $request->getContent();
-        $result = $this->payments->handleMopayWebhook($body);
-        $status = $result['status'] ?? 200;
+        if ($request->isMethod('get')) {
+            return response()->json(['status' => 200, 'message' => 'Xander Meet MoPay webhook ready'], 200);
+        }
 
-        return response()->json(['received' => true], is_int($status) ? $status : 200);
+        $body = $request->getContent();
+        if (trim($body) === '') {
+            return response()->json(['status' => 400, 'message' => 'Empty webhook body'], 400);
+        }
+
+        $result = $this->payments->handleMopayWebhook($body);
+        $httpStatus = is_int($result['status'] ?? null) ? $result['status'] : 200;
+
+        return response()->json(['status' => $httpStatus, 'received' => true], $httpStatus >= 400 ? $httpStatus : 200);
     }
 
     public function adminConsumption(Request $request): JsonResponse
