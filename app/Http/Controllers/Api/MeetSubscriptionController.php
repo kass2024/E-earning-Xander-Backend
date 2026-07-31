@@ -80,14 +80,29 @@ class MeetSubscriptionController extends Controller
             'plan_id' => 'required|exists:meet_subscription_plans,id',
             'institution_id' => 'nullable|integer',
             'user_id' => 'nullable|integer',
+            'email' => 'nullable|email|max:255',
+            'name' => 'nullable|string|max:255',
             'provider' => 'required|in:stripe,mopay',
         ]);
+
+        $userId = $data['user_id'] ?? null;
+        $email = isset($data['email']) ? strtolower(trim($data['email'])) : null;
+        $name = isset($data['name']) ? trim($data['name']) : null;
+
+        if (!$userId && !$email) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Enter your email to subscribe. An account will be created after payment.',
+            ], 422);
+        }
 
         $plan = MeetSubscriptionPlan::findOrFail($data['plan_id']);
         $subscription = $this->payments->createSubscription(
             $plan,
             $data['institution_id'] ?? null,
-            $data['user_id'] ?? null,
+            $userId,
+            $email,
+            $name,
         );
 
         if ($data['provider'] === 'stripe') {
@@ -120,12 +135,28 @@ class MeetSubscriptionController extends Controller
         $data = $request->validate([
             'subscription_id' => 'required|exists:meet_subscriptions,id',
             'phone' => 'required|string|min:9',
+            'email' => 'nullable|email|max:255',
+            'name' => 'nullable|string|max:255',
             'mno' => 'nullable|in:mtn,airtel',
         ]);
 
         $subscription = MeetSubscription::findOrFail($data['subscription_id']);
+
+        if (!$subscription->user_id) {
+            $email = isset($data['email']) ? strtolower(trim($data['email'])) : null;
+            if ($email) {
+                $meta = is_array($subscription->metadata) ? $subscription->metadata : [];
+                $subscription->update([
+                    'metadata' => array_merge($meta, [
+                        'email' => $email,
+                        'name' => trim((string) ($data['name'] ?? $meta['name'] ?? '')),
+                    ]),
+                ]);
+            }
+        }
+
         $result = $this->payments->requestMomoPayment(
-            $subscription,
+            $subscription->fresh(),
             $data['phone'],
             $data['mno'] ?? 'mtn',
         );

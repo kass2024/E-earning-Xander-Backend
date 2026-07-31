@@ -19,6 +19,7 @@ class MeetSubscriptionPaymentService
 {
     public function __construct(
         private readonly MeetUsageService $usageService,
+        private readonly MeetSubscriberAccountService $accounts,
         private readonly MopayGatewayClient $mopay,
         private readonly MopayPaymentService $mopayPayments,
     ) {}
@@ -27,12 +28,23 @@ class MeetSubscriptionPaymentService
         MeetSubscriptionPlan $plan,
         ?int $institutionId = null,
         ?int $userId = null,
+        ?string $email = null,
+        ?string $name = null,
     ): MeetSubscription {
+        $metadata = [];
+        if ($email) {
+            $metadata['email'] = strtolower(trim($email));
+        }
+        if ($name) {
+            $metadata['name'] = trim($name);
+        }
+
         return MeetSubscription::create([
             'platform_institution_id' => $institutionId,
             'user_id' => $userId,
             'plan_id' => $plan->id,
             'status' => 'pending',
+            'metadata' => $metadata ?: null,
         ]);
     }
 
@@ -57,7 +69,13 @@ class MeetSubscriptionPaymentService
             'external_reference' => 'XM-SUB-' . Str::upper(Str::random(12)),
         ]);
 
-        $session = StripeSession::create([
+        $customerEmail = null;
+        $meta = is_array($subscription->metadata) ? $subscription->metadata : [];
+        if (!empty($meta['email'])) {
+            $customerEmail = (string) $meta['email'];
+        }
+
+        $sessionParams = [
             'mode' => 'subscription',
             'payment_method_types' => ['card'],
             'line_items' => [[
@@ -80,7 +98,13 @@ class MeetSubscriptionPaymentService
                 'plan_id' => (string) $plan->id,
                 'product' => 'xander_meet',
             ],
-        ]);
+        ];
+
+        if ($customerEmail) {
+            $sessionParams['customer_email'] = $customerEmail;
+        }
+
+        $session = StripeSession::create($sessionParams);
 
         $payment->update(['stripe_session_id' => $session->id]);
 
@@ -118,12 +142,27 @@ class MeetSubscriptionPaymentService
         }
 
         if ($payment->isPaid()) {
-            return ['ok' => true, 'message' => 'Already activated.', 'subscription' => $this->usageService->usageSummary($subscription)];
+            $account = $this->accountPayload($subscription);
+
+            return [
+                'ok' => true,
+                'message' => 'Already activated.',
+                'subscription' => $this->usageService->usageSummary($subscription),
+                'account' => $account,
+            ];
         }
 
-        $this->activateSubscription($subscription, $payment, 'stripe', $session->subscription ?? null);
+        $stripeEmail = (string) ($session->customer_details->email ?? $session->customer_email ?? '');
+        $this->activateSubscription($subscription, $payment, 'stripe', $session->subscription ?? null, $stripeEmail);
 
-        return ['ok' => true, 'subscription' => $this->usageService->usageSummary($subscription)];
+        $subscription->refresh();
+        $account = $this->accountPayload($subscription);
+
+        return [
+            'ok' => true,
+            'subscription' => $this->usageService->usageSummary($subscription),
+            'account' => $account,
+        ];
     }
 
     /** @return array<string, mixed> */
@@ -185,13 +224,26 @@ class MeetSubscriptionPaymentService
 
         if ($payment->isPaid()) {
             $subscription = $payment->subscription;
-            return ['ok' => true, 'status' => 'paid', 'subscription' => $this->usageService->usageSummary($subscription)];
+
+            return [
+                'ok' => true,
+                'status' => 'paid',
+                'subscription' => $this->usageService->usageSummary($subscription),
+                'account' => $this->accountPayload($subscription),
+            ];
         }
 
         $status = $this->mopay->transactionStatus($reference);
         if ($this->mopay->isSettledSuccess($status)) {
             $this->activateSubscription($payment->subscription, $payment, 'mopay');
-            return ['ok' => true, 'status' => 'paid', 'subscription' => $this->usageService->usageSummary($payment->subscription)];
+            $subscription = $payment->subscription->fresh();
+
+            return [
+                'ok' => true,
+                'status' => 'paid',
+                'subscription' => $this->usageService->usageSummary($subscription),
+                'account' => $this->accountPayload($subscription),
+            ];
         }
 
         if ($this->mopay->isSettledFailure($status)) {
@@ -259,6 +311,7 @@ class MeetSubscriptionPaymentService
         MeetSubscriptionPayment $payment,
         string $provider,
         ?string $stripeSubscriptionId = null,
+        ?string $emailOverride = null,
     ): void {
         $now = now();
         $periodEnd = $now->copy()->addMonth();
@@ -273,6 +326,42 @@ class MeetSubscriptionPaymentService
             'current_period_end' => $periodEnd,
         ]);
 
+        $fresh = $subscription->fresh(['plan']);
+        if (!$fresh->user_id) {
+            $meta = is_array($fresh->metadata) ? $fresh->metadata : [];
+            $this->accounts->provisionFromSubscription(
+                $fresh,
+                $emailOverride ?: ($meta['email'] ?? null),
+                $meta['name'] ?? null,
+            );
+        }
+
         $this->usageService->allocatePeriodCredits($subscription->fresh(['plan']));
+    }
+
+    /** @return array<string, mixed>|null */
+    private function accountPayload(MeetSubscription $subscription): ?array
+    {
+        $subscription->refresh();
+        if (!$subscription->user_id) {
+            return null;
+        }
+
+        $user = User::find($subscription->user_id);
+        if (!$user) {
+            return null;
+        }
+
+        $meta = is_array($subscription->metadata) ? $subscription->metadata : [];
+        $created = (bool) ($meta['account_created'] ?? false);
+        $storedPassword = $meta['issued_password'] ?? null;
+
+        return [
+            'email' => $user->email,
+            'name' => $user->name,
+            'user_id' => $user->id,
+            'created' => $created,
+            'password' => $created ? $storedPassword : null,
+        ];
     }
 }
