@@ -45,7 +45,7 @@ class DatabaseSeeder extends Seeder
 
         $this->call([
             AvailableScheduleSeeder::class,
-            LearningHubDemoSeeder::class,
+            MeetSubscriptionPlanSeeder::class,
             PlatformInstitutionSeeder::class,
         ]);
     }

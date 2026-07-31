@@ -59,6 +59,7 @@ class DailyWebhookEventDispatcher
     {
         $material = $this->resolveMaterial($data);
         if (!$material) {
+            $this->billStandaloneMeeting($data);
             return;
         }
 
@@ -71,6 +72,68 @@ class DailyWebhookEventDispatcher
 
         $material->metadata = $meta;
         $material->save();
+
+        $this->billMeetingFromAttendance($material, $data);
+    }
+
+    /** @param array<string, mixed> $data */
+    protected function billStandaloneMeeting(array $data): void
+    {
+        $room = (string) ($data['room'] ?? $data['room_name'] ?? '');
+        if ($room === '') {
+            return;
+        }
+
+        $duration = max(1, (int) ($data['duration'] ?? 30));
+        $participants = max(1, (int) ($data['max_participants'] ?? $data['participant_count'] ?? 1));
+
+        $this->billByRoomName($room, $participants, $duration);
+    }
+
+    protected function billMeetingFromAttendance(\App\Models\CourseMaterial $material, array $data): void
+    {
+        $segments = LiveMeetingAttendanceSegment::query()
+            ->where('course_material_id', $material->id)
+            ->whereNotNull('joined_at')
+            ->get();
+
+        $totalMinutes = 0;
+        $participantCount = max(1, $segments->count());
+
+        foreach ($segments as $seg) {
+            if ($seg->duration_seconds) {
+                $totalMinutes += max(1, (int) ceil($seg->duration_seconds / 60));
+            }
+        }
+
+        if ($totalMinutes <= 0) {
+            $totalMinutes = max(1, (int) ($data['duration'] ?? 30));
+        }
+
+        $institutionId = $material->course?->platform_institution_id;
+        $this->billByInstitution($institutionId, $participantCount, $totalMinutes, (string) ($data['room'] ?? ''));
+    }
+
+    protected function billByRoomName(string $room, int $participants, int $minutes): void
+    {
+        if (preg_match('/inst-(\d+)/', $room, $m)) {
+            $this->billByInstitution((int) $m[1], $participants, $minutes, $room);
+        }
+    }
+
+    protected function billByInstitution(?int $institutionId, int $participants, int $minutes, string $meetingRef): void
+    {
+        try {
+            $usage = app(\App\Services\Meet\MeetUsageService::class);
+            $sub = $usage->resolveSubscription($institutionId, null);
+            if (!$sub) {
+                return;
+            }
+
+            $usage->consumeCredits($sub, $participants, $minutes, 'daily_meeting_ended', $meetingRef);
+        } catch (\Throwable $e) {
+            Log::warning('Meet credit billing failed', ['error' => $e->getMessage(), 'room' => $meetingRef]);
+        }
     }
 
     /** @param array<string, mixed> $data */

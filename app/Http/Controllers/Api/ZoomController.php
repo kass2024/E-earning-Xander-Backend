@@ -19,6 +19,7 @@ use App\Support\FrontendUrl;
 use App\Support\MeetingJoinUrl;
 use App\Support\MeetingScheduleTimeFormatter;
 use App\Support\MeetingSettingsMapper;
+use App\Support\MeetSubscriptionGate;
 use App\Support\PlatformInstitutionHelper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -26,6 +27,8 @@ use Illuminate\Support\Str;
 
 class ZoomController extends Controller
 {
+    use MeetSubscriptionGate;
+
     protected ZoomService $zoom;
 
     protected MailDeliveryService $mail;
@@ -271,6 +274,15 @@ class ZoomController extends Controller
         }
         // Stamp from authenticated actor — never trust client-only platform_institution_id.
         $institutionId = $tenant['institutionId'];
+
+        $gateResponse = $this->gateMeetingAccess(
+            $institutionId,
+            $user->id ? (int) $user->id : null,
+        );
+        if ($gateResponse) {
+            return $gateResponse;
+        }
+
         $hostId = $this->zoom->resolveHostUserId(
             $institutionId,
             $user->id ? (int) $user->id : null,

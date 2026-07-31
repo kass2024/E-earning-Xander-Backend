@@ -86,8 +86,8 @@ return [
         'default_mno' => env('MOPAY_DEFAULT_MNO', 'mtn'),
         'default_currency' => env('MOPAY_DEFAULT_CURRENCY', 'RWF'),
         'receiver_account_no' => env('MOPAY_RECEIVER_ACCOUNT_NO'),
-        'payment_title' => env('MOPAY_PAYMENT_TITLE', 'Xander_course_payment'),
-        'payment_details' => env('MOPAY_PAYMENT_DETAILS', 'Course enrollment payment'),
+        'payment_title' => env('MOPAY_PAYMENT_TITLE', 'Xander_meet_subscription'),
+        'payment_details' => env('MOPAY_PAYMENT_DETAILS', 'Xander Meet monthly subscription'),
     ],
 
     'pcloud' => [

@@ -103,6 +103,17 @@ Route::prefix('admin')->group(function () {
     Route::get('site-settings/payment-receiver', [\App\Http\Controllers\Api\PaymentSettingsController::class, 'show']);
     Route::put('site-settings/payment-receiver', [\App\Http\Controllers\Api\PaymentSettingsController::class, 'update']);
 
+    /*** ---------------- XANDER MEET SUBSCRIPTIONS ---------------- ***/
+    Route::get('meet/plans', [\App\Http\Controllers\Api\MeetSubscriptionController::class, 'plans']);
+    Route::get('meet/subscription', [\App\Http\Controllers\Api\MeetSubscriptionController::class, 'mySubscription']);
+    Route::post('meet/subscribe', [\App\Http\Controllers\Api\MeetSubscriptionController::class, 'subscribe']);
+    Route::post('meet/subscription/confirm-stripe', [\App\Http\Controllers\Api\MeetSubscriptionController::class, 'confirmStripe']);
+    Route::post('meet/subscription/momo/request', [\App\Http\Controllers\Api\MeetSubscriptionController::class, 'requestMomo']);
+    Route::get('meet/subscription/momo/status/{reference}', [\App\Http\Controllers\Api\MeetSubscriptionController::class, 'momoStatus']);
+    Route::match(['get', 'post'], 'meet/subscription/mopay/webhook', [\App\Http\Controllers\Api\MeetSubscriptionController::class, 'mopayWebhook']);
+    Route::get('meet/subscription/check-access', [\App\Http\Controllers\Api\MeetSubscriptionController::class, 'checkAccess']);
+    Route::get('meet/admin/consumption', [\App\Http\Controllers\Api\MeetSubscriptionController::class, 'adminConsumption']);
+
     // Public guest Pay Now (MoMo, no enrollment)
     Route::get('public/pay-now/courses', [\App\Http\Controllers\Api\ExternalPayNowController::class, 'courses']);
     Route::post('public/pay-now/request', [\App\Http\Controllers\Api\ExternalPayNowController::class, 'request']);
