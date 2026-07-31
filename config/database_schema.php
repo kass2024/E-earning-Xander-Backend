@@ -6,7 +6,7 @@
  * When adding a migration, append the table/columns here (or add to sync_parrot_hub_schema migration).
  */
 return [
-    'users' => ['id', 'name', 'email', 'password', 'role', 'status', 'phone', 'platform_institution_id'],
+    'users' => ['id', 'name', 'email', 'password', 'role', 'status', 'phone', 'platform_institution_id', 'zoom_host_user_id'],
     'students' => ['id', 'email', 'first_name', 'last_name', 'status', 'password', 'country', 'phone', 'primary_goal', 'platform_institution_id'],
     'courses' => ['id', 'title', 'status', 'price', 'course_code', 'program_id', 'platform_institution_id'],
     'elearning_programs' => ['id', 'name', 'status', 'sort_order', 'platform_institution_id'],
@@ -31,4 +31,8 @@ return [
     'study_shift_change_requests' => ['id', 'course_enrollment_id', 'student_id', 'course_id', 'status'],
     'course_materials' => ['id', 'course_id'],
     'quiz_attempts' => ['id'],
+    'meet_subscription_plans' => ['id', 'slug', 'name', 'max_participants', 'monthly_credits', 'price_usd_cents', 'price_rwf', 'is_active'],
+    'meet_subscriptions' => ['id', 'plan_id', 'status', 'billing_provider'],
+    'meet_usage_credits' => ['id', 'subscription_id', 'credits_allocated', 'credits_used'],
+    'meet_subscription_payments' => ['id', 'subscription_id', 'plan_id', 'status', 'provider'],
 ];

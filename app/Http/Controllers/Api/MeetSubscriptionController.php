@@ -8,6 +8,7 @@ use App\Models\MeetSubscriptionPlan;
 use App\Services\Meet\MeetCreditCalculator;
 use App\Services\Meet\MeetSubscriptionPaymentService;
 use App\Services\Meet\MeetUsageService;
+use App\Services\Mopay\MopayGatewayClient;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -41,6 +42,20 @@ class MeetSubscriptionController extends Controller
             ]);
 
         return response()->json(['plans' => $plans]);
+    }
+
+    public function paymentConfig(MopayGatewayClient $mopay): JsonResponse
+    {
+        return response()->json([
+            'stripe' => [
+                'enabled' => filled(config('services.stripe.secret')),
+                'publishable_key' => config('services.stripe.key'),
+            ],
+            'mopay' => [
+                'enabled' => $mopay->isConfigured(),
+                'currency' => config('services.mopay.default_currency', 'RWF'),
+            ],
+        ]);
     }
 
     public function mySubscription(Request $request): JsonResponse

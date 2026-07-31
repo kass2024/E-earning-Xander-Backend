@@ -355,6 +355,16 @@ class AuthController extends Controller
                 })
                 ->first();
         } catch (QueryException $e) {
+            \Illuminate\Support\Facades\Log::error('Login users query failed', [
+                'error' => $e->getMessage(),
+                'code' => $e->getCode(),
+            ]);
+
+            $schema = app(\App\Services\DatabaseSchemaService::class);
+            if (!$schema->schemaReady()) {
+                $schema->runMigrations();
+            }
+
             return response()->json([
                 'message' => 'Database schema error. Run: php artisan schema:rebuild-corrupted --seed --force',
             ], 503);

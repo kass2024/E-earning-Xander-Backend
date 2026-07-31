@@ -105,6 +105,7 @@ Route::prefix('admin')->group(function () {
 
     /*** ---------------- XANDER MEET SUBSCRIPTIONS ---------------- ***/
     Route::get('meet/plans', [\App\Http\Controllers\Api\MeetSubscriptionController::class, 'plans']);
+    Route::get('meet/payments/config', [\App\Http\Controllers\Api\MeetSubscriptionController::class, 'paymentConfig']);
     Route::get('meet/subscription', [\App\Http\Controllers\Api\MeetSubscriptionController::class, 'mySubscription']);
     Route::post('meet/subscribe', [\App\Http\Controllers\Api\MeetSubscriptionController::class, 'subscribe']);
     Route::post('meet/subscription/confirm-stripe', [\App\Http\Controllers\Api\MeetSubscriptionController::class, 'confirmStripe']);
