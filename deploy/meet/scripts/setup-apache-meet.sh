@@ -3,7 +3,7 @@
 # Does NOT touch existing /var/www sites or other vhosts.
 set -euo pipefail
 
-PORT="${MEET_HTTP_PORT:-8091}"
+PORT="${MEET_HTTP_PORT:-8190}"
 CONF="/etc/apache2/sites-available/xander-meet.conf"
 
 sudo tee "$CONF" > /dev/null <<EOF

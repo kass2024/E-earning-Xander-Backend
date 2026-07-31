@@ -42,14 +42,16 @@ if [ ! -f .env.production ]; then
   sed -i 's|VITE_API_URL=.*|VITE_API_URL=https://api.meet.xandertech.llc|' .env.production 2>/dev/null || true
 fi
 
-export MEET_HTTP_PORT=8091
+export MEET_HTTP_PORT=8190
+docker rm -f meet_nginx meet_frontend meet_backend meet_scheduler meet_mysql 2>/dev/null || true
+docker compose -f docker-compose.prod.yml --env-file .env.production down 2>/dev/null || true
 docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
 
 docker exec meet_backend php artisan migrate --force 2>/dev/null || true
 docker exec meet_backend php artisan db:seed --class=MeetSubscriptionPlanSeeder --force 2>/dev/null || true
 
-bash scripts/setup-apache-meet.sh 2>/dev/null || true
+MEET_HTTP_PORT=8190 bash scripts/setup-apache-meet.sh 2>/dev/null || true
 
-echo "Xander Meet deployed at meet.xandertech.llc (port 8091)"
+echo "Xander Meet deployed at meet.xandertech.llc (port 8190)"
 """
 raise SystemExit(d.run(client, cmd, timeout=7200))
