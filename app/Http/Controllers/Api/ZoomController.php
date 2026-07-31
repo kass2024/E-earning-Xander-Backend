@@ -278,6 +278,8 @@ class ZoomController extends Controller
         $gateResponse = $this->gateMeetingAccess(
             $institutionId,
             $user->id ? (int) $user->id : null,
+            1,
+            (string) ($user->role ?? ''),
         );
         if ($gateResponse) {
             return $gateResponse;

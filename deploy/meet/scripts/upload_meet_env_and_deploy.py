@@ -32,7 +32,7 @@ COPY_KEYS = [
     "DAILY_WEBHOOK_HMAC", "DAILY_WEBHOOK_UUID", "DAILY_WEBHOOK_RETRY_TYPE",
     "DAILY_DEFAULT_LANGUAGE", "DAILY_ROOM_GRACE_MINUTES", "DAILY_TOKEN_GRACE_MINUTES",
     "DAILY_RECORDING_ENABLED", "MAIN_PLATFORM_MEETING_PROVIDER",
-    "SEED_PLATFORM_PASSWORD", "PLATFORM_ADMIN_EMAIL",
+    "SEED_PLATFORM_PASSWORD", "PLATFORM_ADMIN_EMAIL", "PLATFORM_ADMIN_NAME",
 ]
 
 MEET_FORCE = {
@@ -71,6 +71,7 @@ MEET_FORCE = {
     "MOPAY_DEFAULT_COUNTRY_CODE": "rw",
     "MOPAY_DEFAULT_MNO": "mtn",
     "MOPAY_CATEGORY": "BIZAO",
+    "PLATFORM_ADMIN_NAME": "Xander Meet Admin",
 }
 
 PRESERVE_IF_REMOTE = {"MYSQL_ROOT_PASSWORD", "DB_PASSWORD", "DB_USERNAME", "DB_DATABASE"}
@@ -106,7 +107,7 @@ def render_env(data: dict[str, str]) -> str:
         "MOPAY_PAYMENT_TITLE", "MOPAY_PAYMENT_DETAILS", "MOPAY_CATEGORY",
         "MAIL_MAILER", "MAIL_HOST", "MAIL_PORT", "MAIL_SCHEME", "MAIL_USERNAME", "MAIL_PASSWORD",
         "MAIL_FROM_ADDRESS", "MAIL_FROM_NAME", "MAIL_ENCRYPTION", "MAIL_EHLO_DOMAIN",
-        "SEED_PLATFORM_PASSWORD", "PLATFORM_ADMIN_EMAIL",
+        "SEED_PLATFORM_PASSWORD", "PLATFORM_ADMIN_EMAIL", "PLATFORM_ADMIN_NAME",
     ]
     lines = ["# Xander Meet production — uploaded via SSH SFTP\n"]
     seen: set[str] = set()
@@ -227,7 +228,9 @@ docker rm -f meet_nginx 2>/dev/null || true
 docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
 sleep 8
 docker exec meet_backend php artisan migrate --force
-docker exec meet_backend php artisan db:seed --class=MeetSubscriptionPlanSeeder --force
+docker exec meet_backend php artisan db:seed --force
+docker exec meet_backend php artisan mopay:register-callbacks 2>/dev/null || true
+docker exec meet_backend php artisan daily:webhook:configure --url=https://meet.xandertech.llc/api/webhooks/daily 2>/dev/null || true
 docker exec meet_backend php artisan config:clear
 docker exec meet_backend php artisan cache:clear
 MEET_HTTP_PORT=8190 bash scripts/setup-apache-meet.sh || true

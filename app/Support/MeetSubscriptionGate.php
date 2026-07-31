@@ -7,8 +7,12 @@ use Illuminate\Http\JsonResponse;
 
 trait MeetSubscriptionGate
 {
-    protected function gateMeetingAccess(?int $institutionId, ?int $userId, int $participants = 1): ?JsonResponse
+    protected function gateMeetingAccess(?int $institutionId, ?int $userId, int $participants = 1, ?string $role = null): ?JsonResponse
     {
+        if (in_array(strtolower((string) $role), ['admin', 'staff'], true)) {
+            return null;
+        }
+
         /** @var MeetUsageService $usage */
         $usage = app(MeetUsageService::class);
         $sub = $usage->resolveSubscription($institutionId, $userId);

@@ -8,7 +8,7 @@ return [
         (string) env('SEED_PLATFORM_PASSWORD', 'Xander@2026'),
         " \t\n\r\0\x0B'\""
     ),
-    'admin_name' => trim((string) env('PLATFORM_ADMIN_NAME', 'Xander Global Scholars Admin')),
+    'admin_name' => trim((string) env('PLATFORM_ADMIN_NAME', 'Xander Meet Admin')),
     'certificate_prefix' => 'XGS',
     'admin_email' => strtolower(trim((string) env(
         'PLATFORM_ADMIN_EMAIL',
