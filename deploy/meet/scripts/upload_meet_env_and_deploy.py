@@ -64,7 +64,7 @@ MEET_FORCE = {
     "MAIN_PLATFORM_MEETING_PROVIDER": "daily",
     "MOPAY_PROJECT_SLUG": "xander",
     "MOPAY_MESSAGE_PREFIX": "XANDER",
-    "MOPAY_CALLBACK_URL": "https://api.meet.xandertech.llc/api/admin/meet/subscription/mopay/webhook",
+    "MOPAY_CALLBACK_URL": "https://meet.xandertech.llc/api/admin/meet/subscription/mopay/webhook",
     "MOPAY_PAYMENT_TITLE": "Xander_meet_subscription",
     "MOPAY_PAYMENT_DETAILS": "Xander Meet monthly subscription",
     "MOPAY_DEFAULT_CURRENCY": "RWF",
