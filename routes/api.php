@@ -114,6 +114,10 @@ Route::prefix('admin')->group(function () {
     Route::match(['get', 'post'], 'meet/subscription/mopay/webhook', [\App\Http\Controllers\Api\MeetSubscriptionController::class, 'mopayWebhook']);
     Route::get('meet/subscription/check-access', [\App\Http\Controllers\Api\MeetSubscriptionController::class, 'checkAccess']);
     Route::get('meet/admin/consumption', [\App\Http\Controllers\Api\MeetSubscriptionController::class, 'adminConsumption']);
+    Route::get('meet/admin/plans', [\App\Http\Controllers\Api\MeetSubscriptionPlanAdminController::class, 'index']);
+    Route::post('meet/admin/plans', [\App\Http\Controllers\Api\MeetSubscriptionPlanAdminController::class, 'store']);
+    Route::put('meet/admin/plans/{plan}', [\App\Http\Controllers\Api\MeetSubscriptionPlanAdminController::class, 'update']);
+    Route::delete('meet/admin/plans/{plan}', [\App\Http\Controllers\Api\MeetSubscriptionPlanAdminController::class, 'destroy']);
 
     // Public guest Pay Now (MoMo, no enrollment)
     Route::get('public/pay-now/courses', [\App\Http\Controllers\Api\ExternalPayNowController::class, 'courses']);
