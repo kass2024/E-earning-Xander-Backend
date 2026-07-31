@@ -45,7 +45,7 @@
       <div class="info-box">
         <div class="info-row">
           <span class="info-label">Date &amp; time</span>
-          <span class="info-value">{{ \Carbon\Carbon::parse($startTime)->toDayDateTimeString() }}</span>
+          <span class="info-value">{{ $startTime }}</span>
         </div>
       </div>
       @if(!empty($notes))

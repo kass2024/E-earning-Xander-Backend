@@ -39,7 +39,7 @@
             </p>
             <p class="paragraph">
                 <span class="highlight">Start time:</span>
-                {{ \Carbon\Carbon::parse($startTime)->toDayDateTimeString() }}
+                {{ $startTime }}
             </p>
             @if(!empty($notes))
                 <p class="paragraph">

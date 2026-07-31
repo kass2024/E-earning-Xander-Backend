@@ -4,6 +4,7 @@ namespace App\Support;
 
 use App\Models\AvailableSchedule;
 use App\Models\MeetingRegistration;
+use App\Models\Student;
 use Carbon\Carbon;
 
 class MeetingScheduleTimeFormatter
@@ -118,6 +119,62 @@ class MeetingScheduleTimeFormatter
         $end = $start->copy()->addMinutes($durationMinutes);
 
         return $start->format('l, F j, Y g:i A') . ' – ' . $end->format('g:i A') . ' (' . $timezone . ')';
+    }
+
+    /**
+     * Resolve a recipient IANA timezone from email (registration country, student country, or fallback).
+     */
+    public static function resolveRecipientTimezoneByEmail(string $email, ?string $fallback = null): string
+    {
+        $fallback = $fallback ?: (string) config('app.timezone', 'UTC');
+        $email = mb_strtolower(trim($email));
+        if ($email === '') {
+            return $fallback;
+        }
+
+        $registration = MeetingRegistration::query()
+            ->whereRaw('LOWER(email) = ?', [$email])
+            ->orderByDesc('id')
+            ->first();
+        if ($registration && !empty($registration->country)) {
+            return self::resolveLearnerTimezone((string) $registration->country, $fallback);
+        }
+
+        $student = Student::query()
+            ->whereRaw('LOWER(email) = ?', [$email])
+            ->first();
+        if ($student && !empty($student->country)) {
+            return self::resolveLearnerTimezone((string) $student->country, $fallback);
+        }
+
+        return $fallback;
+    }
+
+    /**
+     * Format a UTC start instant for meeting invite emails in the recipient's timezone.
+     */
+    public static function formatInviteTime(
+        Carbon|string|null $startUtc,
+        int $durationMinutes,
+        string $recipientTimezone,
+    ): ?string {
+        if ($startUtc === null || $startUtc === '') {
+            return null;
+        }
+
+        try {
+            $start = $startUtc instanceof Carbon
+                ? $startUtc->copy()->utc()
+                : Carbon::parse((string) $startUtc)->utc();
+
+            if ($durationMinutes >= 15) {
+                return self::formatRange($start, $durationMinutes, $recipientTimezone);
+            }
+
+            return self::formatInstant($start, $recipientTimezone);
+        } catch (\Throwable $e) {
+            return is_string($startUtc) ? $startUtc : null;
+        }
     }
 
     /**

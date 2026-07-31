@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\AdminZoomMeeting;
 use App\Services\MailDeliveryService;
+use App\Support\MeetingScheduleTimeFormatter;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
@@ -66,23 +67,36 @@ class SendAdminZoomMeetingReminders extends Command
         }
 
         $subject = 'Reminder: ' . ($meeting->topic ?: 'Zoom meeting');
-        $lines = [
+        $hostTimezone = trim((string) ($meta['timezone'] ?? ''))
+            ?: (string) config('services.pathways_webinar.timezone', config('app.timezone', 'UTC'));
+        $durationMinutes = max(1, (int) ($meta['duration'] ?? $meeting->duration ?? 60));
+
+        $bodyTemplate = [
             $subject,
-            'Starts: ' . $meeting->start_time->toDayDateTimeString(),
+            'Starts: {{time}}',
         ];
 
         if (!empty($meeting->join_url)) {
-            $lines[] = 'Join link: ' . $meeting->join_url;
+            $bodyTemplate[] = 'Join link: ' . $meeting->join_url;
         }
 
         if (!empty($meeting->password)) {
-            $lines[] = 'Password: ' . $meeting->password;
+            $bodyTemplate[] = 'Password: ' . $meeting->password;
         }
-
-        $body = implode("\n", $lines);
 
         foreach ($emails as $email) {
             try {
+                $recipientTimezone = MeetingScheduleTimeFormatter::resolveRecipientTimezoneByEmail($email, $hostTimezone);
+                $formattedTime = MeetingScheduleTimeFormatter::formatInviteTime(
+                    $meeting->start_time,
+                    $durationMinutes,
+                    $recipientTimezone,
+                ) ?? $meeting->start_time->toDayDateTimeString();
+
+                $lines = $bodyTemplate;
+                $lines[1] = 'Starts: ' . $formattedTime;
+                $body = implode("\n", $lines);
+
                 $mail->sendRaw($body, function ($message) use ($email, $subject) {
                     $message->to($email)->subject($subject);
                 }, [

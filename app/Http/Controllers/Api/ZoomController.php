@@ -17,6 +17,7 @@ use App\Support\AdminRecordingCatalog;
 use App\Support\AdminZoomMeetingRegistry;
 use App\Support\FrontendUrl;
 use App\Support\MeetingJoinUrl;
+use App\Support\MeetingScheduleTimeFormatter;
 use App\Support\PlatformInstitutionHelper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -444,6 +445,9 @@ class ZoomController extends Controller
         $subject = ($isWebinar ? 'Webinar invitation: ' : 'Meeting invitation: ') . $topic;
         $meetingId = trim((string) ($data['id'] ?? $data['uuid'] ?? ''));
         $startTime = $data['start_time'] ?? ($payload['start_time'] ?? null);
+        $durationMinutes = max(1, (int) ($data['duration'] ?? $payload['duration'] ?? 60));
+        $hostTimezone = trim((string) ($payload['timezone'] ?? ''))
+            ?: (string) config('services.pathways_webinar.timezone', config('app.timezone', 'UTC'));
         $password = $data['password'] ?? ($payload['password'] ?? null);
 
         foreach ($emails as $email) {
@@ -457,8 +461,13 @@ class ZoomController extends Controller
                 ? MeetingJoinUrl::participantUrl($meetingId, $email, $email)
                 : MeetingJoinUrl::preferAppJoinUrl($data['join_url'] ?? null, $meetingId);
 
+            $recipientTimezone = MeetingScheduleTimeFormatter::resolveRecipientTimezoneByEmail($email, $hostTimezone);
+            $formattedTime = MeetingScheduleTimeFormatter::formatInviteTime($startTime, $durationMinutes, $recipientTimezone);
+
             $lines = [$subject];
-            if ($startTime) {
+            if ($formattedTime) {
+                $lines[] = 'Time: ' . $formattedTime;
+            } elseif ($startTime) {
                 $lines[] = 'Time: ' . $startTime;
             }
             if ($joinUrl) {

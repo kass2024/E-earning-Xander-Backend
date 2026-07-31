@@ -7,7 +7,7 @@ use PHPUnit\Framework\TestCase;
 
 class DailyPermissionPolicyTest extends TestCase
 {
-    public function test_attendee_cannot_send_media(): void
+    public function test_attendee_can_share_screen_in_meeting_mode(): void
     {
         $policy = new DailyPermissionPolicy();
         $props = $policy->tokenPermissionProps(DailyPermissionPolicy::ROLE_ATTENDEE);
@@ -15,9 +15,21 @@ class DailyPermissionPolicyTest extends TestCase
         $this->assertFalse($props['is_owner']);
         $this->assertTrue($props['start_audio_off']);
         $this->assertTrue($props['start_video_off']);
-        $this->assertFalse($props['enable_screenshare']);
-        $this->assertFalse($props['permissions']['canSend']);
+        $this->assertTrue($props['enable_screenshare']);
+        $this->assertSame(['audio', 'video', 'screenVideo', 'screenAudio'], $props['permissions']['canSend']);
         $this->assertFalse($props['permissions']['canAdmin']);
+    }
+
+    public function test_attendee_can_share_screen_in_webinar_mode(): void
+    {
+        $policy = new DailyPermissionPolicy();
+        $props = $policy->tokenPermissionProps(
+            DailyPermissionPolicy::ROLE_ATTENDEE,
+            DailyPermissionPolicy::MODE_WEBINAR,
+        );
+
+        $this->assertTrue($props['enable_screenshare']);
+        $this->assertSame(['screenVideo', 'screenAudio'], $props['permissions']['canSend']);
     }
 
     public function test_host_has_admin_and_send(): void

@@ -30,6 +30,7 @@ use App\Support\CourseDetailsHelper;
 use App\Support\CourseMaterialHelper;
 use App\Support\EnrollmentStatusHelper;
 use App\Support\InstructorLookup;
+use App\Support\MeetingScheduleTimeFormatter;
 use App\Support\PlatformTenantScope;
 use App\Support\ResolvesEnrollmentStaff;
 use App\Services\CourseCodeGenerator;
@@ -629,14 +630,22 @@ class CourseController extends Controller
         $hostRoomUrl = $material ? CourseMaterialHelper::embedRoomUrl($material, 1) : null;
         $hostRoomPath = $material ? CourseMaterialHelper::embedRoomPath($material, 1) : null;
         $learnerPortalUrl = CourseMaterialHelper::learnerPortalUrl();
+        $classDurationMinutes = max(1, (int) ($data['duration'] ?? 60));
 
         if ($staff && !empty($staff->email)) {
+            $staffTimezone = MeetingScheduleTimeFormatter::resolveRecipientTimezoneByEmail($staff->email, $timezone);
+            $staffStartLabel = MeetingScheduleTimeFormatter::formatInviteTime(
+                $scheduledAt,
+                $classDurationMinutes,
+                $staffTimezone,
+            ) ?? $scheduledAt->toIso8601String();
+
             $this->sendCourseMail($course, 
                 $staff->email,
                 new StaffClassScheduledMail(
                     $staff,
                     $course,
-                    $scheduledAt->toIso8601String(),
+                    $staffStartLabel,
                     $hostRoomUrl ?? $learnerPortalUrl,
                     $data['notes'] ?? null,
                     $hostRoomUrl,
@@ -663,12 +672,19 @@ class CourseController extends Controller
                 ? CourseMaterialHelper::embedRoomUrl($material, 0, (int) $student->id)
                 : $learnerPortalUrl;
 
+            $studentTimezone = MeetingScheduleTimeFormatter::resolveRecipientTimezoneByEmail($student->email, $timezone);
+            $studentStartLabel = MeetingScheduleTimeFormatter::formatInviteTime(
+                $scheduledAt,
+                $classDurationMinutes,
+                $studentTimezone,
+            ) ?? $scheduledAt->toIso8601String();
+
             if ($this->sendCourseMail($course, 
                 $student->email,
                 new CourseClassScheduledMail(
                     $student,
                     $course,
-                    $scheduledAt->toIso8601String(),
+                    $studentStartLabel,
                     $studentJoinUrl ?? $learnerPortalUrl,
                     $data['notes'] ?? null,
                     $learnerPortalUrl,

@@ -118,30 +118,30 @@ class DailyPermissionPolicy
      */
     protected function attendeeProps(string $mode): array
     {
-        // Webinar audience: listen-only until host invites to stage.
+        // Webinar audience: listen-only until host invites to stage; screen share allowed for joiners.
         if ($mode === self::MODE_WEBINAR) {
             return [
                 'is_owner' => false,
                 'start_audio_off' => true,
                 'start_video_off' => true,
-                'enable_screenshare' => false,
+                'enable_screenshare' => true,
                 'permissions' => [
                     'hasPresence' => true,
-                    'canSend' => false,
+                    'canSend' => ['screenVideo', 'screenAudio'],
                     'canAdmin' => false,
                 ],
             ];
         }
 
-        // Meeting: join muted / camera off, but allowed to unmute and turn camera on.
+        // Meeting: join muted / camera off, but allowed to unmute, turn camera on, and share screen.
         return [
             'is_owner' => false,
             'start_audio_off' => true,
             'start_video_off' => true,
-            'enable_screenshare' => false,
+            'enable_screenshare' => true,
             'permissions' => [
                 'hasPresence' => true,
-                'canSend' => ['audio', 'video'],
+                'canSend' => ['audio', 'video', 'screenVideo', 'screenAudio'],
                 'canAdmin' => false,
             ],
         ];
