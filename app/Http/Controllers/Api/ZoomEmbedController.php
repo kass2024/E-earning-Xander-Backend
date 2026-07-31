@@ -11,6 +11,7 @@ use App\Models\WebinarSetting;
 use App\Services\LiveClassLobbyService;
 use App\Services\Meetings\LiveMeetingJoinService;
 use App\Services\Meetings\AdminZoomMeetingJoinService;
+use App\Services\Meetings\AdminMeetingSessionService;
 use App\Services\Meetings\WebinarDailyService;
 use App\Services\ZoomMeetingSdkService;
 use App\Services\ZoomService;
@@ -35,6 +36,7 @@ class ZoomEmbedController extends Controller
         protected LiveClassLobbyService $lobbyService,
         protected LiveMeetingJoinService $liveMeetingJoin,
         protected AdminZoomMeetingJoinService $adminZoomJoin,
+        protected AdminMeetingSessionService $adminMeetingSession,
         protected WebinarDailyService $webinarDaily,
     ) {
     }
@@ -115,12 +117,23 @@ class ZoomEmbedController extends Controller
             ? $this->adminZoomJoin->findByRoomName($rawMeetingNumber)
             : null;
         if ($adminMeeting && $this->adminZoomJoin->isDailyMeeting($adminMeeting)) {
+            $meetingSettings = $this->adminZoomJoin->meetingSettingsFor($adminMeeting);
+            $roomName = trim((string) ($adminMeeting->daily_room_name ?: $adminMeeting->zoom_meeting_id ?? ''));
+            $isOwnerJoin = $trustedOwner && $role === 1;
+
+            if (!$isOwnerJoin) {
+                $blocked = $this->adminMeetingSession->guestJoinBlockedMessage($meetingSettings, $roomName);
+                if ($blocked !== null) {
+                    return response()->json(['message' => $blocked], 403);
+                }
+            }
+
             try {
                 $dailySdk = $this->adminZoomJoin->buildSdkPayload(
                     $adminMeeting,
                     $userName,
                     $actorEmail ?: ('guest-' . substr(md5($userName . microtime(true)), 0, 10)),
-                    $trustedOwner && $role === 1,
+                    $isOwnerJoin,
                 );
             } catch (\Throwable $e) {
                 return response()->json(['message' => $e->getMessage()], 422);

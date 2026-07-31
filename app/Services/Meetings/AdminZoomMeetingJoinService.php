@@ -5,6 +5,7 @@ namespace App\Services\Meetings;
 use App\Data\Meetings\MeetingJoinRequest;
 use App\Enums\MeetingProvider;
 use App\Models\AdminZoomMeeting;
+use App\Support\MeetingSettingsMapper;
 use Carbon\Carbon;
 
 /**
@@ -15,6 +16,7 @@ class AdminZoomMeetingJoinService
     public function __construct(
         private readonly DailyApiService $daily,
         private readonly MeetingProviderManager $providers,
+        private readonly AdminMeetingSessionService $sessionService,
     ) {}
 
     public function findByRoomName(string $roomName): ?AdminZoomMeeting
@@ -93,6 +95,7 @@ class AdminZoomMeetingJoinService
             ? DailyPermissionPolicy::MODE_WEBINAR
             : DailyPermissionPolicy::MODE_MEETING;
 
+        $settings = MeetingSettingsMapper::fromMeta(is_array($meeting->meta) ? $meeting->meta : []);
         $duration = max(30, (int) ($meeting->duration ?? 60));
         $scheduledAt = $meeting->start_time ? Carbon::parse($meeting->start_time) : now();
         $expiresAt = $scheduledAt->copy()->addMinutes($duration + 120);
@@ -116,8 +119,20 @@ class AdminZoomMeetingJoinService
                     ? DailyPermissionPolicy::ROLE_HOST
                     : DailyPermissionPolicy::ROLE_ATTENDEE,
                 'meeting_mode' => $meetingMode,
+                'meeting_settings' => $settings,
             ],
         ));
+
+        if ($isOwner) {
+            $this->sessionService->markHostJoined($roomName);
+            if (!empty($settings['auto_recording'])) {
+                try {
+                    $this->daily->startRoomRecording($roomName);
+                } catch (\Throwable) {
+                    // Host can start recording manually from the toolbar.
+                }
+            }
+        }
 
         return [
             'provider' => MeetingProvider::Daily->value,
@@ -130,6 +145,11 @@ class AdminZoomMeetingJoinService
             'user_name' => $userName,
             'permissions' => $join->metadata['permissions'] ?? null,
         ];
+    }
+
+    public function meetingSettingsFor(AdminZoomMeeting $meeting): array
+    {
+        return MeetingSettingsMapper::fromMeta(is_array($meeting->meta) ? $meeting->meta : []);
     }
 
     public function deleteDailyRoom(AdminZoomMeeting $meeting): void
@@ -157,9 +177,12 @@ class AdminZoomMeetingJoinService
             try {
                 $duration = max(30, (int) ($meeting->duration ?? 60));
                 $grace = (int) config('daily.room_grace_minutes', 30);
-                $this->daily->updateRoom($roomName, $this->daily->classroomRoomProperties([
-                    'exp' => now()->addMinutes($duration + $grace)->timestamp,
-                ]));
+                $settings = MeetingSettingsMapper::fromMeta(is_array($meeting->meta) ? $meeting->meta : []);
+                $this->daily->updateRoom($roomName, $this->daily->classroomRoomProperties(
+                    MeetingSettingsMapper::dailyRoomProperties($settings, [
+                        'exp' => now()->addMinutes($duration + $grace)->timestamp,
+                    ]),
+                ));
             } catch (\Throwable) {
                 // non-fatal
             }

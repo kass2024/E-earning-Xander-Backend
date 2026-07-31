@@ -281,8 +281,9 @@ class AdminZoomMeetingRegistry
      */
     protected static function buildMeta(array $requestPayload): array
     {
-        $meta = [];
-        foreach (['category', 'type', 'recurrence', 'reminder', 'timezone', 'require_registration', 'invite_emails'] as $key) {
+        $meta = MeetingSettingsMapper::metaFromPayload($requestPayload);
+
+        foreach (['category', 'type', 'recurrence', 'reminder', 'timezone', 'invite_emails'] as $key) {
             if (array_key_exists($key, $requestPayload) && $requestPayload[$key] !== null && $requestPayload[$key] !== '') {
                 $meta[$key] = $requestPayload[$key];
             }

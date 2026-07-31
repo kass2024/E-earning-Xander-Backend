@@ -20,9 +20,10 @@ class MeetingEngagementPolicyTest extends TestCase
             DailyPermissionPolicy::MODE_WEBINAR,
         );
 
-        $this->assertFalse($props['permissions']['canSend']);
+        $this->assertSame(['screenVideo', 'screenAudio'], $props['permissions']['canSend']);
         $this->assertTrue($props['start_audio_off']);
         $this->assertTrue($props['start_video_off']);
+        $this->assertTrue($props['enable_screenshare']);
     }
 
     public function test_speaking_grant_with_video_and_screen(): void

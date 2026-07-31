@@ -10,6 +10,7 @@ use App\Data\Meetings\MeetingJoinResult;
 use App\Enums\MeetingProvider;
 use App\Exceptions\Meetings\MeetingCreationException;
 use App\Exceptions\Meetings\ProviderNotConfiguredException;
+use App\Support\MeetingSettingsMapper;
 
 class DailyMeetingProvider implements MeetingProviderInterface
 {
@@ -47,18 +48,16 @@ class DailyMeetingProvider implements MeetingProviderInterface
         $grace = (int) config('daily.room_grace_minutes', 30);
         $expiresAt = $request->startAt->copy()->addMinutes($request->durationMinutes + $grace)->timestamp;
 
-        $properties = [
-            'exp' => $expiresAt,
-            // SFU is Daily's default and correct for classrooms — never force P2P.
-            // https://docs.daily.co/docs/guides/architecture-and-monitoring/intro-to-video-arch
-        ];
-        $properties = $this->daily->classroomRoomProperties(array_merge($properties, [
-            'start_audio_off' => $request->muteUponEntry,
-        ]));
+        $settings = MeetingSettingsMapper::fromMeta(
+            is_array($request->context['meeting_settings'] ?? null)
+                ? $request->context['meeting_settings']
+                : $request->context,
+        );
 
-        if ($request->autoRecording && (bool) config('daily.recording_enabled', false)) {
-            $properties['enable_recording'] = 'cloud';
-        }
+        $properties = MeetingSettingsMapper::dailyRoomProperties($settings, [
+            'exp' => $expiresAt,
+        ]);
+        $properties = $this->daily->classroomRoomProperties($properties);
 
         $this->daily->ensureDomainDefaults();
 
@@ -105,13 +104,24 @@ class DailyMeetingProvider implements MeetingProviderInterface
         $expiresAt = $request->expiresAt ?? now()->addHours(4);
         $exp = $expiresAt instanceof \DateTimeInterface ? $expiresAt->getTimestamp() : now()->addHours(4)->timestamp;
         $nbf = now()->subMinutes($tokenGrace)->timestamp;
-        $recordingEnabled = (bool) config('daily.recording_enabled', false)
-            || (bool) config('daily.enabled', false);
 
         $policy = app(DailyPermissionPolicy::class);
         $role = $policy->resolveRole($request->isOwner, $request->context);
         $mode = $policy->resolveMode($request->context);
         $permProps = $policy->tokenPermissionProps($role, $mode);
+
+        $settings = MeetingSettingsMapper::fromMeta(
+            is_array($request->context['meeting_settings'] ?? null)
+                ? $request->context['meeting_settings']
+                : $request->context,
+        );
+        if ($settings !== []) {
+            $permProps = MeetingSettingsMapper::applyToTokenProps($permProps, $settings, $role);
+        }
+
+        $recordingEnabled = !empty($settings['auto_recording'])
+            || (bool) config('daily.recording_enabled', false)
+            || (bool) config('daily.enabled', false);
 
         $tokenProps = [
             'room_name' => $request->externalMeetingId,

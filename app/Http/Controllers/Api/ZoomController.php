@@ -18,6 +18,7 @@ use App\Support\AdminZoomMeetingRegistry;
 use App\Support\FrontendUrl;
 use App\Support\MeetingJoinUrl;
 use App\Support\MeetingScheduleTimeFormatter;
+use App\Support\MeetingSettingsMapper;
 use App\Support\PlatformInstitutionHelper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -318,11 +319,12 @@ class ZoomController extends Controller
                     $expAt = $minExp;
                 }
 
-                $room = $daily->createRoom($roomName, $daily->classroomRoomProperties([
-                    'exp' => $expAt->timestamp,
-                    'start_audio_off' => (bool) ($payload['mute_upon_entry'] ?? true),
-                    'start_video_off' => true,
-                ]));
+                $meetingSettings = MeetingSettingsMapper::normalize($payload);
+                $room = $daily->createRoom($roomName, $daily->classroomRoomProperties(
+                    MeetingSettingsMapper::dailyRoomProperties($meetingSettings, [
+                        'exp' => $expAt->timestamp,
+                    ]),
+                ));
                 $resolvedName = (string) ($room['name'] ?? $roomName);
                 $roomUrl = (string) ($room['url'] ?? $daily->roomUrl($resolvedName));
                 $appJoinUrl = MeetingJoinUrl::participantUrl($resolvedName);

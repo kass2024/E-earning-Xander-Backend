@@ -31,6 +31,7 @@ use App\Support\CourseMaterialHelper;
 use App\Support\EnrollmentStatusHelper;
 use App\Support\InstructorLookup;
 use App\Support\MeetingScheduleTimeFormatter;
+use App\Support\MeetingSettingsMapper;
 use App\Support\PlatformTenantScope;
 use App\Support\ResolvesEnrollmentStaff;
 use App\Services\CourseCodeGenerator;
@@ -521,6 +522,13 @@ class CourseController extends Controller
         $actorEmail = $instructor?->email ?? ($data['instructor_email'] ?? null);
         $meetingProviderValue = MeetingProvider::Daily->value;
         $dailyRoomMeta = [];
+        $liveClassSettings = MeetingSettingsMapper::normalize([
+            'join_before_host' => (bool) ($data['join_before_host'] ?? false),
+            'mute_upon_entry' => (bool) ($data['mute_upon_entry'] ?? true),
+            'auto_recording' => (bool) ($data['auto_recording'] ?? false),
+            'host_video' => (bool) ($data['host_video'] ?? true),
+            'participant_video' => (bool) ($data['participant_video'] ?? false),
+        ]);
 
         if (!$zoomJoinLink) {
             $institution = $institutionId ? PlatformInstitution::query()->find($institutionId) : null;
@@ -538,11 +546,12 @@ class CourseController extends Controller
                     actorUserId: $actorUserId,
                     actorEmail: $actorEmail,
                     agenda: $data['notes'] ?? '',
-                    joinBeforeHost: (bool) ($data['join_before_host'] ?? false),
-                    waitingRoom: !((bool) ($data['join_before_host'] ?? false)),
-                    muteUponEntry: (bool) ($data['mute_upon_entry'] ?? true),
-                    autoRecording: (bool) ($data['auto_recording'] ?? false),
+                    joinBeforeHost: (bool) $liveClassSettings['join_before_host'],
+                    waitingRoom: (bool) $liveClassSettings['waiting_room'],
+                    muteUponEntry: (bool) $liveClassSettings['mute_upon_entry'],
+                    autoRecording: (bool) $liveClassSettings['auto_recording'],
                     courseId: (int) $course->id,
+                    context: ['meeting_settings' => $liveClassSettings],
                 ));
             } catch (ProviderNotConfiguredException $e) {
                 return response()->json(['message' => $e->getMessage()], 503);
@@ -608,9 +617,11 @@ class CourseController extends Controller
                         'timezone' => $timezone,
                         'auto_recording' => $recordingEnabled,
                         'recording_enabled' => $recordingEnabled,
-                        'join_before_host' => (bool) ($data['join_before_host'] ?? false),
-                        'waiting_room' => !((bool) ($data['join_before_host'] ?? false)),
-                        'mute_upon_entry' => (bool) ($data['mute_upon_entry'] ?? true),
+                        'join_before_host' => (bool) $liveClassSettings['join_before_host'],
+                        'waiting_room' => (bool) $liveClassSettings['waiting_room'],
+                        'mute_upon_entry' => (bool) $liveClassSettings['mute_upon_entry'],
+                        'host_video' => (bool) $liveClassSettings['host_video'],
+                        'participant_video' => (bool) $liveClassSettings['participant_video'],
                     ], static fn ($v) => $v !== null),
                     'sort_order' => 0,
                 ]);

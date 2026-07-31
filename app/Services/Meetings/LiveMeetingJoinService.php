@@ -6,6 +6,7 @@ use App\Data\Meetings\MeetingJoinRequest;
 use App\Enums\MeetingProvider;
 use App\Models\CourseMaterial;
 use App\Support\CourseMaterialHelper;
+use App\Support\MeetingSettingsMapper;
 use Carbon\Carbon;
 
 class LiveMeetingJoinService
@@ -52,9 +53,12 @@ class LiveMeetingJoinService
             $roomUrl = $recreated['url'];
         } else {
             try {
-                $this->daily->updateRoom($roomName, $this->daily->classroomRoomProperties([
-                    'exp' => now()->addHours(12)->timestamp,
-                ]));
+                $refreshSettings = MeetingSettingsMapper::fromMeta($meta);
+                $this->daily->updateRoom($roomName, $this->daily->classroomRoomProperties(
+                    MeetingSettingsMapper::dailyRoomProperties($refreshSettings, [
+                        'exp' => now()->addHours(12)->timestamp,
+                    ]),
+                ));
             } catch (\Throwable) {
                 // non-fatal
             }
@@ -68,6 +72,11 @@ class LiveMeetingJoinService
         }
 
         $meta = is_array($material->metadata) ? $material->metadata : [];
+        $settings = MeetingSettingsMapper::fromMeta($meta);
+        if (empty($settings['auto_recording'])) {
+            $settings['auto_recording'] = MeetingSettingsMapper::toBool($meta['recording_enabled'] ?? false);
+        }
+
         $institutionId = isset($meta['platform_institution_id']) ? (int) $meta['platform_institution_id'] : 0;
         if ($institutionId <= 0) {
             $material->loadMissing('course:id,platform_institution_id');
@@ -89,8 +98,17 @@ class LiveMeetingJoinService
                     ? \App\Services\Meetings\DailyPermissionPolicy::ROLE_HOST
                     : \App\Services\Meetings\DailyPermissionPolicy::ROLE_ATTENDEE,
                 'meeting_mode' => \App\Services\Meetings\DailyPermissionPolicy::MODE_MEETING,
+                'meeting_settings' => $settings,
             ],
         ));
+
+        if ($isOwner && !empty($settings['auto_recording'])) {
+            try {
+                $this->daily->startRoomRecording($roomName);
+            } catch (\Throwable) {
+                // Host can start recording manually from the toolbar.
+            }
+        }
 
         return [
             'provider' => MeetingProvider::Daily->value,
@@ -148,9 +166,12 @@ class LiveMeetingJoinService
             $hostUserId && $hostUserId > 0 ? $hostUserId : null,
         );
         $this->daily->ensureDomainDefaults();
-        $room = $this->daily->createRoom($roomName, $this->daily->classroomRoomProperties([
-            'exp' => now()->addHours(12)->timestamp,
-        ]));
+        $settings = MeetingSettingsMapper::fromMeta($meta);
+        $room = $this->daily->createRoom($roomName, $this->daily->classroomRoomProperties(
+            MeetingSettingsMapper::dailyRoomProperties($settings, [
+                'exp' => now()->addHours(12)->timestamp,
+            ]),
+        ));
         $resolvedName = (string) ($room['name'] ?? $roomName);
         $roomUrl = (string) ($room['url'] ?? $this->daily->roomUrl($resolvedName));
 

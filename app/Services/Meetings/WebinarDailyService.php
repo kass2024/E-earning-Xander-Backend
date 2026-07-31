@@ -7,6 +7,7 @@ use App\Enums\MeetingProvider;
 use App\Models\WebinarSetting;
 use App\Services\PlatformSettingsService;
 use App\Support\FrontendUrl;
+use App\Support\MeetingSettingsMapper;
 use Illuminate\Support\Str;
 
 /**
@@ -88,11 +89,17 @@ class WebinarDailyService
         }
 
         $existing = trim((string) ($settings->zoom_meeting_id ?? ''));
+        $webinarSettings = MeetingSettingsMapper::webinarRegistrationDefaults(
+            (bool) ($settings->recording_enabled ?? false),
+        );
+
         if ($existing !== '' && $this->isDailyWebinar($settings) && $this->isRoomReusable($existing)) {
             try {
-                $this->daily->updateRoom($existing, $this->daily->classroomRoomProperties([
-                    'exp' => now()->addHours(12)->timestamp,
-                ]));
+                $this->daily->updateRoom($existing, $this->daily->classroomRoomProperties(
+                    MeetingSettingsMapper::dailyRoomProperties($webinarSettings, [
+                        'exp' => now()->addHours(12)->timestamp,
+                    ]),
+                ));
             } catch (\Throwable) {
                 // non-fatal
             }
@@ -105,9 +112,11 @@ class WebinarDailyService
         try {
             $this->daily->ensureDomainDefaults();
             $roomName = 'webinar-' . ($institutionId && $institutionId > 0 ? $institutionId : 'main') . '-' . Str::lower(Str::random(8));
-            $room = $this->daily->createRoom($roomName, $this->daily->classroomRoomProperties([
-                'exp' => now()->addHours(12)->timestamp,
-            ]));
+            $room = $this->daily->createRoom($roomName, $this->daily->classroomRoomProperties(
+                MeetingSettingsMapper::dailyRoomProperties($webinarSettings, [
+                    'exp' => now()->addHours(12)->timestamp,
+                ]),
+            ));
             $resolvedName = (string) ($room['name'] ?? $roomName);
             $roomUrl = (string) ($room['url'] ?? $this->daily->roomUrl($resolvedName));
 
@@ -154,6 +163,9 @@ class WebinarDailyService
         }
 
         $provider = $this->providers->forProvider(MeetingProvider::Daily);
+        $webinarSettings = MeetingSettingsMapper::webinarRegistrationDefaults(
+            (bool) ($settings->recording_enabled ?? false),
+        );
         $join = $provider->buildJoinDetails(new MeetingJoinRequest(
             externalMeetingId: $roomName,
             roomUrl: $roomUrl,
@@ -169,8 +181,17 @@ class WebinarDailyService
                     ? \App\Services\Meetings\DailyPermissionPolicy::ROLE_HOST
                     : \App\Services\Meetings\DailyPermissionPolicy::ROLE_ATTENDEE,
                 'meeting_mode' => \App\Services\Meetings\DailyPermissionPolicy::MODE_WEBINAR,
+                'meeting_settings' => $webinarSettings,
             ],
         ));
+
+        if ($isOwner && !empty($webinarSettings['auto_recording'])) {
+            try {
+                $this->daily->startRoomRecording($roomName);
+            } catch (\Throwable) {
+                // Host can start recording manually from the toolbar.
+            }
+        }
 
         return [
             'provider' => MeetingProvider::Daily->value,
