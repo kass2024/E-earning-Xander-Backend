@@ -11,6 +11,15 @@ class FrontendUrl
     {
         $explicit = rtrim((string) config('app.frontend_url', ''), '/');
         if ($explicit !== '') {
+            // Legacy Parrot/e-learning.school env on xanderglobalacademy.com VPS.
+            if (in_array(strtolower($explicit), [
+                'https://e-learning.school',
+                'http://e-learning.school',
+                'https://www.e-learning.school',
+            ], true)) {
+                return 'https://xanderglobalacademy.com';
+            }
+
             return $explicit;
         }
 
