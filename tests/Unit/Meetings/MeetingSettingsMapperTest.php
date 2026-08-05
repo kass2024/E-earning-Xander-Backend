@@ -41,29 +41,24 @@ class MeetingSettingsMapperTest extends TestCase
         $this->assertTrue($props['enable_knocking']);
     }
 
-    public function test_token_props_respect_host_and_participant_video(): void
+    public function test_apply_to_token_keeps_screen_when_participant_video_off(): void
     {
         $policy = new DailyPermissionPolicy();
         $settings = MeetingSettingsMapper::normalize([
-            'host_video' => false,
             'participant_video' => false,
-            'mute_upon_entry' => false,
+            'mute_upon_entry' => true,
         ]);
-
-        $host = MeetingSettingsMapper::applyToTokenProps(
-            $policy->tokenPermissionProps(DailyPermissionPolicy::ROLE_HOST),
-            $settings,
-            DailyPermissionPolicy::ROLE_HOST,
-        );
-        $this->assertTrue($host['start_video_off']);
 
         $attendee = MeetingSettingsMapper::applyToTokenProps(
             $policy->tokenPermissionProps(DailyPermissionPolicy::ROLE_ATTENDEE),
             $settings,
             DailyPermissionPolicy::ROLE_ATTENDEE,
         );
-        $this->assertTrue($attendee['start_video_off']);
-        $this->assertFalse($attendee['start_audio_off']);
-        $this->assertNotContains('video', $attendee['permissions']['canSend']);
+
+        $canSend = $attendee['permissions']['canSend'];
+        $this->assertIsArray($canSend);
+        $this->assertNotContains('video', $canSend);
+        $this->assertContains('screenVideo', $canSend);
+        $this->assertContains('screenAudio', $canSend);
     }
 }

@@ -112,6 +112,11 @@ class MeetingSettingsMapper
                 $canSend,
                 static fn (string $media): bool => $media !== 'video',
             ));
+            foreach (['screenVideo', 'screenAudio'] as $screenMedia) {
+                if (!in_array($screenMedia, $props['permissions']['canSend'], true)) {
+                    $props['permissions']['canSend'][] = $screenMedia;
+                }
+            }
         }
 
         return $props;
