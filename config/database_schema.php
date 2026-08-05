@@ -1,9 +1,9 @@
 <?php
 
 /**
- * Expected database schema for parrotglobalstudyacademy.
+ * Expected database schema for xanderglobalscholars.
  * Used by DatabaseSchemaService to detect incomplete deployments and trigger auto-migrate.
- * When adding a migration, append the table/columns here (or add to sync_parrot_hub_schema migration).
+ * When adding a migration, append the table/columns here (or add to sync_xander_hub_schema migration).
  */
 return [
     'users' => ['id', 'name', 'email', 'password', 'role', 'status', 'phone', 'platform_institution_id', 'zoom_host_user_id'],

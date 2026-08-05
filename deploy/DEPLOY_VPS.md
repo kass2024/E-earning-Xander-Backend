@@ -14,7 +14,7 @@
 
 ## Do not disturb existing Apache sites
 
-Existing `/var/www` folders (`html`, `Marketing`, `parrot-moc`, `whatsap`, `xanderbot`, `xandermock`) stay untouched.
+Existing `/var/www` folders (`html`, `Marketing`, `xander-moc`, `whatsap`, `xanderbot`, `xandermock`) stay untouched.
 
 | Rule | Detail |
 |------|--------|

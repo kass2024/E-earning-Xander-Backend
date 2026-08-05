@@ -190,7 +190,7 @@ class LiveZoomCohortZoomService
     protected function buildAgenda(LiveZoomCohort $cohort, string $dayLabel, int $duration, string $timezone): string
     {
         $lines = [
-            (string) config('app.name', 'parrotglobalstudyacademy') . ' — Live Zoom Cohort',
+            (string) config('app.name', 'xanderglobalscholars') . ' — Live Zoom Cohort',
             "Day: {$dayLabel}",
             'Time: ' . substr((string) $cohort->start_time, 0, 5) . ' – ' . substr((string) $cohort->end_time, 0, 5) . " ({$timezone})",
             "Duration: {$duration} minutes",
@@ -215,7 +215,7 @@ class LiveZoomCohortZoomService
         string $timezone
     ): string {
         $lines = [
-            (string) config('app.name', 'parrotglobalstudyacademy') . ' — Live Zoom Cohort',
+            (string) config('app.name', 'xanderglobalscholars') . ' — Live Zoom Cohort',
             "Topic: {$topic}",
             "Meeting ID: {$meetingId}",
             "Join link: {$joinUrl}",

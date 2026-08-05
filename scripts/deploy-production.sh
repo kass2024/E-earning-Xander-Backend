@@ -7,7 +7,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 echo "=========================================="
-echo " Parrot Academy API — production deploy"
+echo " Xander Academy API — production deploy"
 echo "=========================================="
 echo "Path: $ROOT"
 echo ""

@@ -254,9 +254,9 @@ class ZoomMeetingBrandingResolver
             $name = $hub;
         }
 
-        // Strip legacy Parrot labels if APP_NAME still carries them.
-        $name = (string) preg_replace('/parrot\s*global\s*study\s*academy/i', $hub, $name);
-        $name = (string) preg_replace('/parrotglobalstudyacademy/i', $hub, $name);
+        // Strip legacy Xander labels if APP_NAME still carries them.
+        $name = (string) preg_replace('/xander\s*global\s*study\s*academy/i', $hub, $name);
+        $name = (string) preg_replace('/xanderglobalscholars/i', $hub, $name);
         $name = trim($name);
 
         return $name !== '' ? $name : $hub;

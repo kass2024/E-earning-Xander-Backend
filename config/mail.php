@@ -46,7 +46,7 @@ return [
                 default => null,
             },
             'url' => env('MAIL_URL'),
-            // cPanel: use parrotglobalstudyacademy.ca (not mail.* — shared hosting cert mismatch on local XAMPP).
+            // cPanel: use xanderglobalscholars.ca (not mail.* — shared hosting cert mismatch on local XAMPP).
             'host' => env('MAIL_HOST', '127.0.0.1'),
             'port' => env('MAIL_PORT', 465),
             'username' => env('MAIL_USERNAME'),

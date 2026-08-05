@@ -61,7 +61,7 @@ class CertificateController extends Controller
                 'enrollment_status' => $enrollment->status,
                 'issued_at' => $enrollment->updated_at?->toIso8601String(),
                 'verify_url' => self::verifyUrl($courseId, $studentId),
-                'issuer' => config('app.name', 'parrotglobalstudyacademy'),
+                'issuer' => config('app.name', 'xanderglobalscholars'),
                 'issuer_tagline' => 'Study. Learn. Succeed Globally.',
             ],
         ], 200);

@@ -220,7 +220,7 @@ class ZoomController extends Controller
         $allowed = array_values(array_unique(array_filter([
             rtrim((string) config('app.frontend_url'), '/'),
             FrontendUrl::base(),
-            'https://parrotglobalstudyacademy.ca',
+            'https://xanderglobalscholars.ca',
             'http://localhost:8080',
             'http://127.0.0.1:8080',
         ])));

@@ -36,7 +36,7 @@ return [
       'sort_order' => 2,
       'keywords' => [
         'ai mastery',
-        'parrot ai',
+        'xander ai',
         'artificial intelligence',
         'machine learning',
         'data science',

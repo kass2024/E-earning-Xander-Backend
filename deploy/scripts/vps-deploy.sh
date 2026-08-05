@@ -76,15 +76,15 @@ if [ "$IMPORT_DB" = "1" ]; then
     set +a
     echo "Waiting for MySQL..."
     for i in $(seq 1 30); do
-      if docker exec parrot_mysql mysqladmin ping -h localhost -uroot -p"$MYSQL_ROOT_PASSWORD" --silent 2>/dev/null; then
+      if docker exec xander_mysql mysqladmin ping -h localhost -uroot -p"$MYSQL_ROOT_PASSWORD" --silent 2>/dev/null; then
         break
       fi
       sleep 2
     done
     if [[ "$DUMP" == *.gz ]]; then
-      gunzip -c "$DUMP" | docker exec -i parrot_mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$DB_DATABASE"
+      gunzip -c "$DUMP" | docker exec -i xander_mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$DB_DATABASE"
     else
-      docker exec -i parrot_mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$DB_DATABASE" < "$DUMP"
+      docker exec -i xander_mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$DB_DATABASE" < "$DUMP"
     fi
     echo "DB import done."
   else
@@ -98,7 +98,7 @@ if [ -f "$DEPLOY/scripts/setup-apache-proxy.sh" ]; then
   if [ -f /etc/apache2/sites-enabled/xander-academy-elearning.conf ]; then
     echo "    Apache e-learning vhost already enabled."
   else
-    PARROT_HTTP_PORT=8090 bash "$DEPLOY/scripts/setup-apache-proxy.sh" || true
+    XANDER_HTTP_PORT=8090 bash "$DEPLOY/scripts/setup-apache-proxy.sh" || true
   fi
 fi
 

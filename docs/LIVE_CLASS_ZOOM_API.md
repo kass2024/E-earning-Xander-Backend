@@ -12,7 +12,7 @@ Docs: [Zoom Meeting SDK](https://marketplacefront.zoom.us/sdk/meeting/web/compon
 
 **Default:** full-page Zoom Web Client via `ZoomMtg` (Client View). Meeting routes (`/meeting/room`, `/live-cohort/.../room`, `/live-cohort/.../host`) render full viewport — no dashboard sidebar, no iframe, no CSS scale/clipping.
 
-| Step | Parrot implementation |
+| Step | Xander implementation |
 |------|----------------------|
 | `ZoomMtg.preLoadWasm()` + `prepareWebSDK()` | `loadZoomClientSdk()` in `src/lib/zoomClientLoader.ts` |
 | `ZoomMtg.init({ leaveUrl, patchJsMedia })` | `initClient()` in `src/lib/zoomClientSession.ts` |
@@ -23,7 +23,7 @@ Docs: [Zoom Meeting SDK](https://marketplacefront.zoom.us/sdk/meeting/web/compon
 
 ### Component View reference (opt-in only)
 
-| SDK doc step | Parrot implementation |
+| SDK doc step | Xander implementation |
 |--------------|----------------------|
 | Step 1 — `ZoomMtgEmbedded.createClient()` | `loadZoomEmbeddedModule()` → `createClient()` in `EmbeddedZoomMeeting.tsx` |
 | Step 2 — HTML container `#meetingSDKElement` | `<div id="meetingSDKElement" ref={rootRef} class="zoom-sdk-mount" />` |

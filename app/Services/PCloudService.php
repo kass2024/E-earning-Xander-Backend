@@ -29,7 +29,7 @@ class PCloudService
         $this->accessToken = self::normalizeAccessToken(
             config('services.pcloud.access_token') ?: env('PCLOUD_ACCESS_TOKEN')
         );
-        $this->rootFolder = trim((string) config('services.pcloud.root_folder', 'ParrotAcademy'), '/');
+        $this->rootFolder = trim((string) config('services.pcloud.root_folder', 'XanderAcademy'), '/');
 
         $rootId = config('services.pcloud.root_folder_id') ?: env('PCLOUD_ROOT_FOLDER_ID', 31887143130);
         if (is_numeric($rootId) && (int) $rootId > 0) {
