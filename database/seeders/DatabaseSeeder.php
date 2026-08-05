@@ -19,9 +19,8 @@ class DatabaseSeeder extends Seeder
         PlatformUserService::deleteLegacyEmails();
 
         $this->call([
-            MeetSubscriptionPlanSeeder::class,
-            MeetBootstrapSeeder::class,
             AvailableScheduleSeeder::class,
+            LearningHubDemoSeeder::class,
             PlatformInstitutionSeeder::class,
         ]);
     }
