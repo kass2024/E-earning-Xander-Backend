@@ -129,7 +129,9 @@ class LearningHubDemoSeeder extends Seeder
         foreach ($students as $index => $studentData) {
             $student = Student::updateOrCreate(
                 ['email' => $studentData['email']],
-                $studentData
+                array_merge($studentData, [
+                    'name' => trim(($studentData['first_name'] ?? '') . ' ' . ($studentData['last_name'] ?? '')),
+                ])
             );
 
             $course = $createdCourses[$index % count($createdCourses)];
