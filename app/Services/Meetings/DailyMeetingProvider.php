@@ -54,15 +54,12 @@ class DailyMeetingProvider implements MeetingProviderInterface
                 : $request->context,
         );
 
-        $properties = MeetingSettingsMapper::dailyRoomProperties($settings, [
-            'exp' => $expiresAt,
-        ]);
-        $properties = $this->daily->classroomRoomProperties($properties);
-
         $this->daily->ensureDomainDefaults();
 
         try {
-            $room = $this->daily->createRoom($roomName, $properties);
+            $room = $this->daily->createClassroomRoom($roomName, $settings, [
+                'exp' => $expiresAt,
+            ]);
         } catch (\Throwable $e) {
             throw new MeetingCreationException('Daily room could not be created: ' . $e->getMessage(), 0, $e);
         }

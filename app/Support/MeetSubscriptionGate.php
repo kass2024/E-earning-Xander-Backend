@@ -9,7 +9,17 @@ trait MeetSubscriptionGate
 {
     protected function gateMeetingAccess(?int $institutionId, ?int $userId, int $participants = 1, ?string $role = null): ?JsonResponse
     {
-        if (in_array(strtolower((string) $role), ['admin', 'staff'], true)) {
+        $roleNormalized = strtolower(trim((string) $role));
+
+        // Xander Learning Hub — meetings/webinars/live classes are included for staff roles.
+        if (in_array($roleNormalized, ['admin', 'staff', 'instructor', 'partner_company'], true)) {
+            return null;
+        }
+
+        // Billing gate applies only on the dedicated Xander Meet product (meet.xandertech.llc).
+        $frontendUrl = strtolower(rtrim((string) config('app.frontend_url', ''), '/'));
+        $meetProduct = str_contains($frontendUrl, 'meet.xandertech.llc');
+        if (!$meetProduct) {
             return null;
         }
 

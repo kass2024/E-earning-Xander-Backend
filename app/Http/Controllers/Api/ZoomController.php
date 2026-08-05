@@ -334,11 +334,9 @@ class ZoomController extends Controller
                 }
 
                 $meetingSettings = MeetingSettingsMapper::normalize($payload);
-                $room = $daily->createRoom($roomName, $daily->classroomRoomProperties(
-                    MeetingSettingsMapper::dailyRoomProperties($meetingSettings, [
-                        'exp' => $expAt->timestamp,
-                    ]),
-                ));
+                $room = $daily->createClassroomRoom($roomName, $meetingSettings, [
+                    'exp' => $expAt->timestamp,
+                ]);
                 $resolvedName = (string) ($room['name'] ?? $roomName);
                 $roomUrl = (string) ($room['url'] ?? $daily->roomUrl($resolvedName));
                 $appJoinUrl = MeetingJoinUrl::participantUrl($resolvedName);

@@ -637,6 +637,39 @@ class MeetingRegistrationController extends Controller
         ?AvailableSchedule $schedule,
         ?User $actor = null,
     ): array {
+        $institutionId = !empty($schedule?->platform_institution_id)
+            ? (int) $schedule->platform_institution_id
+            : (!empty($settings->platform_institution_id) ? (int) $settings->platform_institution_id : null);
+
+        if ($this->webinarDaily->shouldUseDaily()) {
+            $duration = $this->scheduleDurationMinutes($schedule);
+            $daily = $this->webinarDaily->ensureScheduledRoom($settings, $startAt, $duration, $institutionId);
+            if (!($daily['ok'] ?? false)) {
+                return [
+                    'ok' => false,
+                    'message' => $daily['message'] ?? 'Could not prepare the Daily webinar room.',
+                ];
+            }
+
+            $fresh = $daily['settings'] ?? $settings->fresh();
+            if ($fresh instanceof WebinarSetting) {
+                $this->applyWebinarHostAssignment($fresh, null, $institutionId);
+                $this->syncApprovedRegistrationZoomLinks(
+                    (string) ($daily['join_url'] ?? $fresh->zoom_join_url),
+                    (string) ($daily['meeting_id'] ?? $fresh->zoom_meeting_id),
+                    $institutionId,
+                );
+            }
+
+            return [
+                'ok' => true,
+                'join_url' => $daily['join_url'] ?? null,
+                'start_url' => $daily['start_url'] ?? null,
+                'meeting_id' => $daily['meeting_id'] ?? null,
+                'reused' => (bool) ($daily['reused'] ?? false),
+            ];
+        }
+
         if (!$this->zoom->isConfigured()) {
             return [
                 'ok' => false,

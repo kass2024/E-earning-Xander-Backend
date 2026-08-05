@@ -34,6 +34,13 @@ class MeetingSettingsMapperTest extends TestCase
         $this->assertSame('cloud', $props['enable_recording']);
     }
 
+    public function test_daily_room_properties_enable_knocking_for_waiting_room(): void
+    {
+        $settings = MeetingSettingsMapper::normalize(['waiting_room' => true]);
+        $props = MeetingSettingsMapper::dailyRoomProperties($settings);
+        $this->assertTrue($props['enable_knocking']);
+    }
+
     public function test_token_props_respect_host_and_participant_video(): void
     {
         $policy = new DailyPermissionPolicy();

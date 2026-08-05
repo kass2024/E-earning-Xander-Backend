@@ -9,6 +9,7 @@ use App\Models\PlatformInstitution;
 use App\Services\Meetings\DailyApiService;
 use App\Services\Meetings\MeetingProviderManager;
 use App\Services\PlatformSettingsService;
+use App\Support\MeetingSettingsMapper;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
@@ -126,16 +127,10 @@ class LiveZoomCohortDailyService
         $exp = now()->addHours(12)->addMinutes((int) config('daily.room_grace_minutes', 30))->timestamp;
 
         try {
-            $roomProps = [
-                'exp' => $exp,
-            ];
-            if ((bool) config('daily.recording_enabled', false) || (bool) config('daily.enabled', false)) {
-                $roomProps['enable_recording'] = 'cloud';
-            }
-            $room = $this->daily->createRoom(
-                $roomName,
-                $this->daily->classroomRoomProperties($roomProps),
-            );
+            $recordingSettings = (bool) config('daily.recording_enabled', false)
+                ? MeetingSettingsMapper::normalize(['auto_recording' => true])
+                : [];
+            $room = $this->daily->createClassroomRoom($roomName, $recordingSettings, ['exp' => $exp]);
         } catch (\Throwable $e) {
             return [
                 'ok' => false,

@@ -21,6 +21,14 @@ class FrontendUrl
             return 'https://xanderglobalacademy.com';
         }
 
+        if ($appUrl !== '' && preg_match('#^https?://api\.xanderglobalacademy\.com#i', $appUrl)) {
+            return 'https://xanderglobalacademy.com';
+        }
+
+        if ($appUrl !== '' && preg_match('#^https?://api\.e-learning\.school#i', $appUrl)) {
+            return 'https://xanderglobalacademy.com';
+        }
+
         // Generic: api.example.com → elearning.example.com
         if ($appUrl !== '' && preg_match('#^https?://api\.(.+)$#i', $appUrl, $matches)) {
             $scheme = str_starts_with(strtolower($appUrl), 'https://') ? 'https' : 'http';
