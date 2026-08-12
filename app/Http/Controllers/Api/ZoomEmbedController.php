@@ -149,6 +149,10 @@ class ZoomEmbedController extends Controller
                 unset($branding['institution'], $branding['use_institution_logo']);
                 $branding['use_hub_branding'] = true;
                 $branding['is_main_platform_host'] = true;
+            } else {
+                // Meeting row tenant wins — keep institution logo even for elevated operators.
+                $branding['use_institution_logo'] = true;
+                unset($branding['use_hub_branding'], $branding['is_main_platform_host']);
             }
             $branding['session_title'] = trim((string) ($adminMeeting->topic ?? '')) ?: 'Meeting';
             $branding['meeting_mode'] = strtolower(trim((string) (

@@ -105,7 +105,34 @@ class ZoomMeetingBrandingResolver
         $actorEmail = $actorUser?->email;
         $isConfiguredZoomHost = $this->isConfiguredZoomHostActor($zoomHostContext, $actorEmail);
 
-        if ($isMainPlatformHost) {
+        // Institution tenant sessions keep partner logos even when a main-platform
+        // operator is the authenticated actor (meetings / webinars / live classes).
+        if ($useInstitutionBranding) {
+            $institutionName = trim((string) ($branding['institution']['name'] ?? ''));
+            if ($institutionName !== '') {
+                $branding['company']['name'] = $institutionName;
+                // Host tile / Daily userName = institution name when camera is off.
+                $branding['host']['name'] = $institutionName;
+            }
+            $institutionLogo = null;
+            if (!empty($branding['institution']['logo_url']) || !empty($branding['institution']['logo_path'])) {
+                $institution = null;
+                if (!empty($branding['institution']['id'])) {
+                    $institution = PlatformInstitution::query()->find((int) $branding['institution']['id']);
+                }
+                $institutionLogo = $institution
+                    ? $this->institutionLogoUrl($institution)
+                    : PublicStorageUrl::toApiAbsoluteUrl(
+                        (string) ($branding['institution']['logo_url'] ?? $branding['institution']['logo_path'] ?? '')
+                    );
+            }
+            if ($institutionLogo) {
+                $branding['institution']['logo_url'] = $institutionLogo;
+                $branding['host']['avatar_url'] = $institutionLogo;
+            }
+            unset($branding['use_hub_branding'], $branding['is_main_platform_host']);
+            $branding['use_institution_logo'] = true;
+        } elseif ($isMainPlatformHost) {
             unset($branding['use_institution_logo'], $branding['institution']);
             // Main platform hosts always appear as Xander Learning Hub (not personal Zoom name).
             $branding['host']['name'] = $this->platformCompanyName();
@@ -113,16 +140,6 @@ class ZoomMeetingBrandingResolver
             $branding['company']['name'] = $this->platformCompanyName();
             $branding['is_main_platform_host'] = true;
             $branding['use_hub_branding'] = true;
-        } elseif ($useInstitutionBranding) {
-            $institutionName = trim((string) ($branding['institution']['name'] ?? ''));
-            if ($institutionName !== '') {
-                $branding['company']['name'] = $institutionName;
-                // Host tile / Daily userName = institution name when camera is off.
-                $branding['host']['name'] = $institutionName;
-            }
-            if (!empty($branding['institution']['logo_url'])) {
-                $branding['host']['avatar_url'] = $branding['institution']['logo_url'];
-            }
         } elseif ($isConfiguredZoomHost || !$useInstitutionBranding) {
             unset($branding['use_institution_logo'], $branding['institution']);
             $branding['host']['avatar_url'] = $zoomHostContext['avatar_url'] ?? null;
@@ -168,6 +185,15 @@ class ZoomMeetingBrandingResolver
             return false;
         }
 
+        // Explicit meeting/course/webinar tenant always brands as that institution.
+        if ($cohort && !empty($cohort->platform_institution_id)) {
+            return true;
+        }
+
+        if ($platformInstitutionId) {
+            return true;
+        }
+
         $actorUser = $this->resolveActorUser($actorEmail);
         if ($actorUser && PlatformInstitutionHelper::isMainPlatformAdmin($actorUser)) {
             return false;
@@ -176,14 +202,6 @@ class ZoomMeetingBrandingResolver
         // Hub hosting session: no tenant id in the request — never brand as another institution.
         if (!$allowActorInstitutionFallback && !$platformInstitutionId && !$cohort) {
             return false;
-        }
-
-        if ($cohort && !empty($cohort->platform_institution_id)) {
-            return true;
-        }
-
-        if ($platformInstitutionId) {
-            return true;
         }
 
         if ($actorUser && !PlatformInstitutionHelper::isMainPlatformAdmin($actorUser)) {
