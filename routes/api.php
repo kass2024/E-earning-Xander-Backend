@@ -118,6 +118,9 @@ Route::prefix('admin')->group(function () {
     Route::post('meet/admin/plans', [\App\Http\Controllers\Api\MeetSubscriptionPlanAdminController::class, 'store']);
     Route::put('meet/admin/plans/{plan}', [\App\Http\Controllers\Api\MeetSubscriptionPlanAdminController::class, 'update']);
     Route::delete('meet/admin/plans/{plan}', [\App\Http\Controllers\Api\MeetSubscriptionPlanAdminController::class, 'destroy']);
+    Route::get('meet/admin/promo-codes', [\App\Http\Controllers\Api\MeetSubscriptionPromoAdminController::class, 'index']);
+    Route::post('meet/admin/promo-codes', [\App\Http\Controllers\Api\MeetSubscriptionPromoAdminController::class, 'store']);
+    Route::patch('meet/admin/promo-codes/{promoCode}', [\App\Http\Controllers\Api\MeetSubscriptionPromoAdminController::class, 'update']);
 
     // Public guest Pay Now (MoMo, no enrollment)
     Route::get('public/pay-now/courses', [\App\Http\Controllers\Api\ExternalPayNowController::class, 'courses']);

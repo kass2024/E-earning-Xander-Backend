@@ -5,11 +5,13 @@ namespace App\Services\Meet;
 use App\Models\MeetSubscription;
 use App\Models\MeetSubscriptionPayment;
 use App\Models\MeetSubscriptionPlan;
+use App\Models\MeetSubscriptionPromoCode;
 use App\Models\PlatformInstitution;
 use App\Models\User;
 use App\Services\Mopay\MopayGatewayClient;
 use App\Services\MopayPaymentService;
 use App\Services\PaymentReceiverService;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Stripe\Checkout\Session as StripeSession;
@@ -114,6 +116,59 @@ class MeetSubscriptionPaymentService
             'session_id' => $session->id,
             'reference' => $payment->external_reference,
         ];
+    }
+
+    /** @return array<string, mixed> */
+    public function redeemPromo(
+        MeetSubscriptionPlan $plan,
+        string $code,
+        ?int $institutionId = null,
+        ?int $userId = null,
+        ?string $email = null,
+        ?string $name = null,
+    ): array {
+        return DB::transaction(function () use ($plan, $code, $institutionId, $userId, $email, $name) {
+            $promo = MeetSubscriptionPromoCode::query()
+                ->whereRaw('UPPER(code) = ?', [strtoupper(trim($code))])
+                ->lockForUpdate()
+                ->first();
+
+            if (!$promo || !$promo->isRedeemable($plan->id)) {
+                return ['ok' => false, 'message' => 'Invalid or expired promo code.'];
+            }
+
+            if ($promo->plan_id && (int) $promo->plan_id !== (int) $plan->id) {
+                return ['ok' => false, 'message' => 'This promo code is not valid for the selected plan.'];
+            }
+
+            $subscription = $this->createSubscription($plan, $institutionId, $userId, $email, $name);
+            $payment = MeetSubscriptionPayment::create([
+                'subscription_id' => $subscription->id,
+                'plan_id' => $plan->id,
+                'amount_cents' => 0,
+                'currency' => 'USD',
+                'provider' => 'promo',
+                'status' => 'pending',
+                'external_reference' => 'XM-PROMO-'.Str::upper(Str::random(10)),
+                'metadata' => [
+                    'promo_code_id' => $promo->id,
+                    'promo_code' => $promo->code,
+                ],
+            ]);
+
+            $promo->increment('uses_count');
+            $this->activateSubscription($subscription, $payment, 'promo');
+
+            $fresh = $subscription->fresh(['plan']);
+
+            return [
+                'ok' => true,
+                'message' => 'Subscription activated with promo code.',
+                'reference' => $payment->external_reference,
+                'subscription' => $this->usageService->usageSummary($fresh),
+                'account' => $this->accountPayload($fresh),
+            ];
+        });
     }
 
     /** @return array<string, mixed> */

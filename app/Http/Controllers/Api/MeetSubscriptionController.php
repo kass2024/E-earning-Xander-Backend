@@ -55,6 +55,9 @@ class MeetSubscriptionController extends Controller
                 'enabled' => $mopay->isConfigured(),
                 'currency' => config('services.mopay.default_currency', 'RWF'),
             ],
+            'promo' => [
+                'enabled' => true,
+            ],
         ]);
     }
 
@@ -82,7 +85,8 @@ class MeetSubscriptionController extends Controller
             'user_id' => 'nullable|integer',
             'email' => 'nullable|email|max:255',
             'name' => 'nullable|string|max:255',
-            'provider' => 'required|in:stripe,mopay',
+            'provider' => 'required|in:stripe,mopay,promo',
+            'promo_code' => 'required_if:provider,promo|nullable|string|max:64',
         ]);
 
         $userId = $data['user_id'] ?? null;
@@ -97,6 +101,20 @@ class MeetSubscriptionController extends Controller
         }
 
         $plan = MeetSubscriptionPlan::findOrFail($data['plan_id']);
+
+        if ($data['provider'] === 'promo') {
+            $result = $this->payments->redeemPromo(
+                $plan,
+                (string) $data['promo_code'],
+                $data['institution_id'] ?? null,
+                $userId,
+                $email,
+                $name,
+            );
+
+            return response()->json($result, ($result['ok'] ?? false) ? 200 : 422);
+        }
+
         $subscription = $this->payments->createSubscription(
             $plan,
             $data['institution_id'] ?? null,
