@@ -144,6 +144,7 @@ class AdminZoomMeetingJoinService
             'meeting_mode' => $meetingMode,
             'user_name' => $userName,
             'permissions' => $join->metadata['permissions'] ?? null,
+            'enable_screenshare' => (bool) ($join->metadata['enable_screenshare'] ?? true),
         ];
     }
 

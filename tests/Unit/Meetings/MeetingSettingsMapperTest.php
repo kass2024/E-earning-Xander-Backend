@@ -57,6 +57,7 @@ class MeetingSettingsMapperTest extends TestCase
         );
         $this->assertTrue($attendee['start_video_off']);
         $this->assertFalse($attendee['start_audio_off']);
-        $this->assertNotContains('video', $attendee['permissions']['canSend']);
+        $this->assertTrue($attendee['enable_screenshare']);
+        $this->assertTrue($attendee['permissions']['canSend']);
     }
 }

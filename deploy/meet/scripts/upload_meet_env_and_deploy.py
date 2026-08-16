@@ -57,7 +57,7 @@ MEET_FORCE = {
     "SESSION_LIFETIME": "120",
     "CACHE_STORE": "database",
     "QUEUE_CONNECTION": "sync",
-    "LOG_CHANNEL": "stack",
+    "LOG_CHANNEL": "stderr",
     "LOG_LEVEL": "info",
     "DAILY_WEBHOOK_BASE_URL": "https://meet.xandertech.llc",
     "DAILY_INTEGRATION_ENABLED": "true",
@@ -227,6 +227,7 @@ export MEET_HTTP_PORT=8190
 docker rm -f meet_nginx 2>/dev/null || true
 docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
 sleep 8
+docker exec -u root meet_backend sh -c 'mkdir -p /var/www/html/storage/logs /var/www/html/bootstrap/cache && chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache && chmod -R ug+rwx /var/www/html/storage /var/www/html/bootstrap/cache' || true
 docker exec meet_backend php artisan migrate --force
 docker exec meet_backend php artisan db:seed --force
 docker exec meet_backend php artisan mopay:register-callbacks 2>/dev/null || true

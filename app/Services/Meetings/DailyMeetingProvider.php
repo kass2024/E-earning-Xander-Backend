@@ -145,14 +145,19 @@ class DailyMeetingProvider implements MeetingProviderInterface
 
         $token = $this->daily->createMeetingToken($tokenProps);
 
-        \Illuminate\Support\Facades\Log::info('daily.meeting_token_issued', [
-            'room_name' => $request->externalMeetingId,
-            'user_id' => (string) $request->userId,
-            'meeting_role' => $role,
-            'meeting_mode' => $mode,
-            'is_owner' => (bool) $permProps['is_owner'],
-            // never log the token itself
-        ]);
+        try {
+            \Illuminate\Support\Facades\Log::info('daily.meeting_token_issued', [
+                'room_name' => $request->externalMeetingId,
+                'user_id' => (string) $request->userId,
+                'meeting_role' => $role,
+                'meeting_mode' => $mode,
+                'is_owner' => (bool) $permProps['is_owner'],
+                'enable_screenshare' => (bool) $permProps['enable_screenshare'],
+                // never log the token itself
+            ]);
+        } catch (\Throwable) {
+            // Log volume permission issues must not block joining.
+        }
 
         return new MeetingJoinResult(
             provider: MeetingProvider::Daily,
@@ -165,6 +170,7 @@ class DailyMeetingProvider implements MeetingProviderInterface
                 'meeting_role' => $role,
                 'meeting_mode' => $mode,
                 'permissions' => $permProps['permissions'],
+                'enable_screenshare' => (bool) $permProps['enable_screenshare'],
             ],
         );
     }

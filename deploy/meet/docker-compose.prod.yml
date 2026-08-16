@@ -29,6 +29,7 @@ services:
     environment:
       DB_HOST: mysql
       DB_PORT: 3306
+      LOG_CHANNEL: stderr
     volumes:
       - meet_backend_storage:/var/www/html/storage
       - meet_backend_cache:/var/www/html/bootstrap/cache
@@ -47,6 +48,7 @@ services:
     environment:
       DB_HOST: mysql
       DB_PORT: 3306
+      LOG_CHANNEL: stderr
     command: ["php", "artisan", "schedule:work"]
     volumes:
       - meet_backend_storage:/var/www/html/storage

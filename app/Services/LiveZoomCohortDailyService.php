@@ -205,6 +205,7 @@ class LiveZoomCohortDailyService
             'meeting_mode' => 'meeting',
             'user_name' => $userName,
             'permissions' => $join->metadata['permissions'] ?? null,
+            'enable_screenshare' => (bool) ($join->metadata['enable_screenshare'] ?? true),
         ];
     }
 

@@ -31,13 +31,13 @@ class MeetingEngagementPolicyTest extends TestCase
         $policy = new DailyPermissionPolicy();
         $update = $policy->speakingGrantUpdate(true, true, true);
 
-        $this->assertSame(['audio', 'video', 'screenVideo', 'screenAudio'], $update['canSend']);
+        $this->assertSame(['screenVideo', 'screenAudio', 'audio', 'video'], $update['canSend']);
     }
 
     public function test_revoke_clears_publish(): void
     {
         $policy = new DailyPermissionPolicy();
-        $this->assertSame(['canSend' => false], $policy->revokePublishUpdate());
+        $this->assertSame(['canSend' => ['screenVideo', 'screenAudio']], $policy->revokePublishUpdate());
     }
 
     public function test_default_speak_timer_bucket_seconds(): void

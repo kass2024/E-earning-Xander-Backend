@@ -203,6 +203,7 @@ class WebinarDailyService
             'meeting_mode' => 'webinar',
             'user_name' => $userName,
             'permissions' => $join->metadata['permissions'] ?? null,
+            'enable_screenshare' => (bool) ($join->metadata['enable_screenshare'] ?? true),
         ];
     }
 

@@ -141,7 +141,7 @@ class DailyPermissionPolicy
             'enable_screenshare' => true,
             'permissions' => [
                 'hasPresence' => true,
-                'canSend' => ['audio', 'video', 'screenVideo', 'screenAudio'],
+                'canSend' => true,
                 'canAdmin' => false,
             ],
         ];
@@ -149,19 +149,20 @@ class DailyPermissionPolicy
 
     /**
      * Permissions payload for host updateParticipant after speaking approval.
+     * Screen share stays available on joiner links even when only audio is granted.
      *
      * @return array{canSend: list<string>}
      */
     public function speakingGrantUpdate(bool $audio, bool $video, bool $screenShare = false): array
     {
-        $canSend = [];
+        $canSend = ['screenVideo', 'screenAudio'];
         if ($audio) {
             $canSend[] = 'audio';
         }
         if ($video) {
             $canSend[] = 'video';
         }
-        if ($screenShare) {
+        if ($screenShare && !in_array('screenVideo', $canSend, true)) {
             $canSend[] = 'screenVideo';
             $canSend[] = 'screenAudio';
         }
@@ -170,11 +171,13 @@ class DailyPermissionPolicy
     }
 
     /**
-     * @return array{canSend: bool}
+     * Revoke mic/camera publish, but keep screen share on joiner links.
+     *
+     * @return array{canSend: list<string>}
      */
     public function revokePublishUpdate(): array
     {
-        return ['canSend' => false];
+        return ['canSend' => ['screenVideo', 'screenAudio']];
     }
 
     public function canModerate(string $role): bool
