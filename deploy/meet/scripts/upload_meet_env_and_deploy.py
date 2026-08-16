@@ -14,6 +14,7 @@ DEPLOY = BACKEND / "deploy"
 MEET_DEPLOY = DEPLOY / "meet"
 LOCAL_PROD = DEPLOY / ".env.production"
 LOCAL_ENV = BACKEND / ".env"
+XANDER_ENV = Path(r"C:\xampp\htdocs\Xander\.env")
 REMOTE_ENV = "/opt/xander-meet/E-learning-parrot-backend/deploy/meet/.env.production"
 MEET_ROOT = "/opt/xander-meet"
 
@@ -176,6 +177,13 @@ def main() -> int:
             base[key] = local[key]
         elif key in base and base[key]:
             pass
+    if XANDER_ENV.exists():
+        xander = parse_env(XANDER_ENV.read_text(encoding="utf-8", errors="ignore"))
+        for key in ("STRIPE_SECRET_KEY", "STRIPE_PUBLIC_KEY"):
+            val = (xander.get(key) or "").strip()
+            if val:
+                base[key] = val
+                print(f"Using Xander {key} ({val[:7]}…)")
     base.update(MEET_FORCE)
 
     if not base.get("DB_PASSWORD"):
