@@ -190,7 +190,7 @@ class ZoomService
             }
 
             return [
-                'name' => $name !== '' ? $name : (string) config('app.name', 'parrotglobalstudyacademy Learning'),
+                'name' => $name !== '' ? $name : (string) config('app.name', 'xanderglobalscholars Learning'),
                 'email' => $email,
                 'avatar_url' => $avatarUrl,
             ];

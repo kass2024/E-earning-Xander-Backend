@@ -5,7 +5,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Idempotent schema sync for parrotglobalstudyacademy features:
+ * Idempotent schema sync for xanderglobalscholars features:
  * student/instructor approval, Stripe payments, enrollments, Zoom cohorts.
  * Safe to run on fresh installs and legacy production databases.
  */

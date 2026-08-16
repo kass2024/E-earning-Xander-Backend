@@ -23,7 +23,7 @@ else
   certbot certificates || true
 fi
 echo '=== final status ==='
-docker ps --filter name=parrot_ --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+docker ps --filter name=xander_ --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
 ls /var/www
 curl -sS -o /dev/null -w 'http_front:%{http_code}\n' -H 'Host: xanderglobalacademy.com' http://127.0.0.1/
 curl -sS -o /dev/null -w 'http_api:%{http_code}\n' -H 'Host: api.xanderglobalacademy.com' http://127.0.0.1/up

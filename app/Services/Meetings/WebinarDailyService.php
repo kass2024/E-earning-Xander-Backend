@@ -8,6 +8,7 @@ use App\Models\WebinarSetting;
 use App\Services\PlatformSettingsService;
 use App\Support\FrontendUrl;
 use App\Support\MeetingSettingsMapper;
+use Carbon\Carbon;
 use Illuminate\Support\Str;
 
 /**
@@ -112,11 +113,9 @@ class WebinarDailyService
         try {
             $this->daily->ensureDomainDefaults();
             $roomName = 'webinar-' . ($institutionId && $institutionId > 0 ? $institutionId : 'main') . '-' . Str::lower(Str::random(8));
-            $room = $this->daily->createRoom($roomName, $this->daily->classroomRoomProperties(
-                MeetingSettingsMapper::dailyRoomProperties($webinarSettings, [
-                    'exp' => now()->addHours(12)->timestamp,
-                ]),
-            ));
+            $room = $this->daily->createClassroomRoom($roomName, $webinarSettings, [
+                'exp' => now()->addHours(12)->timestamp,
+            ]);
             $resolvedName = (string) ($room['name'] ?? $roomName);
             $roomUrl = (string) ($room['url'] ?? $this->daily->roomUrl($resolvedName));
 
@@ -127,6 +126,93 @@ class WebinarDailyService
             $settings->save();
 
             return ['ok' => true, 'settings' => $settings->fresh()];
+        } catch (\Throwable $e) {
+            return [
+                'ok' => false,
+                'message' => 'Unable to create Daily webinar room: ' . $e->getMessage(),
+            ];
+        }
+    }
+
+    /**
+     * Create or reuse a Daily room for a scheduled registration webinar session.
+     *
+     * @return array{
+     *   ok: bool,
+     *   message?: string,
+     *   join_url?: string|null,
+     *   start_url?: string|null,
+     *   meeting_id?: string|null,
+     *   reused?: bool,
+     *   settings?: WebinarSetting
+     * }
+     */
+    public function ensureScheduledRoom(
+        WebinarSetting $settings,
+        Carbon $startAt,
+        int $durationMinutes,
+        ?int $institutionId = null,
+    ): array {
+        if (!$this->daily->isConfigured()) {
+            return ['ok' => false, 'message' => 'Daily is not configured on this server.'];
+        }
+
+        $sessionKey = $startAt->copy()->utc()->format('Y-m-d H:i');
+        $existing = trim((string) ($settings->zoom_meeting_id ?? ''));
+
+        if (
+            $existing !== ''
+            && $this->isDailyWebinar($settings)
+            && $settings->zoom_join_url
+            && $settings->zoom_scheduled_at
+            && $sessionKey === Carbon::parse($settings->zoom_scheduled_at)->utc()->format('Y-m-d H:i')
+            && $this->isRoomReusable($existing)
+        ) {
+            return [
+                'ok' => true,
+                'join_url' => $settings->zoom_join_url,
+                'start_url' => $settings->zoom_start_url,
+                'meeting_id' => $existing,
+                'reused' => true,
+                'settings' => $settings,
+            ];
+        }
+
+        $webinarSettings = MeetingSettingsMapper::webinarRegistrationDefaults(
+            (bool) ($settings->recording_enabled ?? false),
+        );
+
+        $grace = (int) config('daily.room_grace_minutes', 30);
+        $expAt = $startAt->copy()->addMinutes(max(1, $durationMinutes) + $grace);
+        $minExp = now()->addMinutes(max(1, $durationMinutes) + $grace);
+        if ($expAt->lt($minExp)) {
+            $expAt = $minExp;
+        }
+
+        try {
+            $this->daily->ensureDomainDefaults();
+            $roomName = 'webinar-' . ($institutionId && $institutionId > 0 ? $institutionId : 'main')
+                . '-' . Str::lower(Str::random(8));
+            $room = $this->daily->createClassroomRoom($roomName, $webinarSettings, [
+                'exp' => $expAt->timestamp,
+            ]);
+            $resolvedName = (string) ($room['name'] ?? $roomName);
+            $roomUrl = (string) ($room['url'] ?? $this->daily->roomUrl($resolvedName));
+
+            $settings->zoom_meeting_id = $resolvedName;
+            $settings->zoom_scheduled_at = $startAt;
+            $settings->zoom_password = null;
+            $this->persistAppUrls($settings, $resolvedName, $roomUrl);
+            $settings->save();
+
+            return [
+                'ok' => true,
+                'join_url' => $this->appParticipantJoinUrl($resolvedName),
+                'start_url' => $settings->zoom_start_url,
+                'meeting_id' => $resolvedName,
+                'reused' => false,
+                'settings' => $settings->fresh(),
+            ];
         } catch (\Throwable $e) {
             return [
                 'ok' => false,

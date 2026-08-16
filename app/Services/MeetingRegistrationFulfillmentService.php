@@ -308,6 +308,35 @@ class MeetingRegistrationFulfillmentService
         Carbon $startAt,
         ?AvailableSchedule $schedule,
     ): array {
+        $institutionId = !empty($schedule?->platform_institution_id)
+            ? (int) $schedule->platform_institution_id
+            : null;
+
+        if ($this->webinarDaily->shouldUseDaily()) {
+            $duration = $this->scheduleDurationMinutes($schedule);
+            $daily = $this->webinarDaily->ensureScheduledRoom($settings, $startAt, $duration, $institutionId);
+            if (!($daily['ok'] ?? false)) {
+                return [
+                    'ok' => false,
+                    'message' => $daily['message'] ?? 'Could not prepare the Daily webinar room.',
+                ];
+            }
+
+            $meetingId = (string) ($daily['meeting_id'] ?? '');
+            $joinUrl = $daily['join_url'] ?? null;
+            if ($meetingId !== '' && $joinUrl) {
+                $this->syncApprovedRegistrationZoomLinks($joinUrl, $meetingId, $institutionId);
+            }
+
+            return [
+                'ok' => true,
+                'join_url' => $joinUrl,
+                'start_url' => $daily['start_url'] ?? null,
+                'meeting_id' => $meetingId !== '' ? $meetingId : null,
+                'reused' => (bool) ($daily['reused'] ?? false),
+            ];
+        }
+
         if (!$this->zoom->isConfigured()) {
             return [
                 'ok' => false,

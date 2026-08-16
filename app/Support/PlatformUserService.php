@@ -9,15 +9,23 @@ class PlatformUserService
 {
     public const DEFAULT_ADMIN_EMAIL = 'info@xanderglobalscholars.com';
 
-    /** @var array<string, string> Old Parrot logins → current platform admin. */
+    /** @var array<string, string> Old platform logins → current platform admin. */
     private const LEGACY_EMAIL_ALIASES = [
+        'infos@xanderglobalscholars.ca' => self::DEFAULT_ADMIN_EMAIL,
         'infos@parrotglobalstudyacademy.ca' => self::DEFAULT_ADMIN_EMAIL,
+        'infos@parrotglobalscholaracademy.ca' => self::DEFAULT_ADMIN_EMAIL,
+        'admin@xander.com' => self::DEFAULT_ADMIN_EMAIL,
         'admin@parrot.com' => self::DEFAULT_ADMIN_EMAIL,
     ];
 
-    /** @var list<string> */
+    /** @var list<string> Default demo accounts removed from fresh seeds. */
     private const LEGACY_EMAILS_TO_DELETE = [
+        'admin@xander.com',
         'admin@parrot.com',
+        'staff@xanderglobalscholars.com',
+        'staff@xanderglobalscholars.ca',
+        'staff@parrotglobalstudyacademy.ca',
+        'staff@parrotglobalscholaracademy.ca',
     ];
 
     public static function adminEmail(): string
@@ -49,7 +57,10 @@ class PlatformUserService
         $admin = self::adminEmail();
 
         $aliases = array_merge(self::LEGACY_EMAIL_ALIASES, [
+            'infos@xanderglobalscholars.ca' => $admin,
             'infos@parrotglobalstudyacademy.ca' => $admin,
+            'infos@parrotglobalscholaracademy.ca' => $admin,
+            'admin@xander.com' => $admin,
             'admin@parrot.com' => $admin,
         ]);
 

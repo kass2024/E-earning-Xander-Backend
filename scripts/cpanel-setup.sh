@@ -2,7 +2,7 @@
 # Run on cPanel terminal from the Laravel project root (where artisan lives)
 set -e
 
-echo "==> Parrot API cPanel setup"
+echo "==> Xander API cPanel setup"
 cd "$(dirname "$0")/.."
 
 if [ ! -f artisan ]; then
@@ -54,5 +54,5 @@ php artisan route:cache
 
 echo ""
 echo "==> Test:"
-echo "curl -s \"\${APP_URL:-https://api.parrotglobalstudyacademy.ca}/api/admin/system/health\""
-echo "curl -s \"\${APP_URL:-https://api.parrotglobalstudyacademy.ca}/up\""
+echo "curl -s \"\${APP_URL:-https://api.xanderglobalscholars.ca}/api/admin/system/health\""
+echo "curl -s \"\${APP_URL:-https://api.xanderglobalscholars.ca}/up\""

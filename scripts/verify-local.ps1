@@ -5,13 +5,13 @@ $ErrorActionPreference = "Stop"
 $backend = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $backend
 
-Write-Host "`n=== Parrot platform local verification ===`n" -ForegroundColor Cyan
+Write-Host "`n=== Xander platform local verification ===`n" -ForegroundColor Cyan
 
 php artisan platform:verify-local --seed --repair
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host "`n=== HTTP login (port 8000) ===`n" -ForegroundColor Cyan
-$body = '{"username":"infos@parrotglobalstudyacademy.ca","password":"admin123"}'
+$body = '{"username":"infos@xanderglobalscholars.ca","password":"admin123"}'
 try {
     $r = Invoke-WebRequest -Uri "http://127.0.0.1:8000/api/admin/auth/login" -Method POST -Body $body -ContentType "application/json" -UseBasicParsing -TimeoutSec 10
     Write-Host "[OK] Direct API: $($r.Content)" -ForegroundColor Green
@@ -20,6 +20,6 @@ try {
 }
 
 Write-Host "`nDefault login (local + cPanel):" -ForegroundColor Cyan
-Write-Host "  Email:    infos@parrotglobalstudyacademy.ca"
+Write-Host "  Email:    infos@xanderglobalscholars.ca"
 Write-Host "  Password: admin123"
 Write-Host "  (Legacy info@xanderglobalscholars.com also works)`n"

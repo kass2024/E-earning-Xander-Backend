@@ -75,6 +75,11 @@ class MeetingSettingsMapper
             $props['enable_recording'] = 'cloud';
         }
 
+        // Waiting room → knock before owner admits; join-before-host off is enforced in join auth.
+        if (!empty($settings['waiting_room'])) {
+            $props['enable_knocking'] = true;
+        }
+
         return array_merge($props, $overrides);
     }
 
@@ -107,6 +112,11 @@ class MeetingSettingsMapper
                 $canSend,
                 static fn (string $media): bool => $media !== 'video',
             ));
+            foreach (['screenVideo', 'screenAudio'] as $screenMedia) {
+                if (!in_array($screenMedia, $props['permissions']['canSend'], true)) {
+                    $props['permissions']['canSend'][] = $screenMedia;
+                }
+            }
         }
 
         return $props;

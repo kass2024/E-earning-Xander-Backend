@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Portable MoPay Gateway V1 client (aligned with parrot_mis payments/mopay/auth.php + start.php).
+ * Portable MoPay Gateway V1 client (aligned with xander_mis payments/mopay/auth.php + start.php).
  *
  * Copy this class into any Laravel app and point config at that project's own MOPAY_* env vars.
  * Each project must use its own merchant credentials, callback URL, and signing key so webhook
@@ -55,7 +55,7 @@ class MopayGatewayClient
     }
 
     /**
-     * Rwanda MoMo MSISDN as 12 digits: 2507XXXXXXXX (same as parrot_mis).
+     * Rwanda MoMo MSISDN as 12 digits: 2507XXXXXXXX (same as xander_mis).
      */
     public function normalizeMsisdn(string $phone): string
     {
@@ -77,7 +77,7 @@ class MopayGatewayClient
     /**
      * Value for the Authorization header (no "Authorization:" prefix).
      *
-     * Matches parrot_mis mopay_get_authorization_value():
+     * Matches xander_mis mopay_get_authorization_value():
      * 1) MOPAY_BEARER_TOKEN if set
      * 2) Cached /token access_token (Bearer)
      * 3) Fallback: raw MOPAY_AUTH_KEY (NOT "Basic " wrapped)
@@ -107,7 +107,7 @@ class MopayGatewayClient
             return 'Bearer ' . $token;
         }
 
-        // Critical: parrot_mis uses the auth_key value as-is (often raw base64, not "Basic …").
+        // Critical: xander_mis uses the auth_key value as-is (often raw base64, not "Basic …").
         return $authKey;
     }
 
@@ -279,7 +279,7 @@ class MopayGatewayClient
         $body = $res->json();
         $raw = $res->body();
 
-        // parrot_mis start.php: retry once if transfer amount mismatch; enable allow_transfer_cap.
+        // xander_mis start.php: retry once if transfer amount mismatch; enable allow_transfer_cap.
         if (
             $useTransfer
             && $res->status() >= 400

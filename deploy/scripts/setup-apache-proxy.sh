@@ -3,7 +3,7 @@
 # Safe: does NOT touch /var/www DocumentRoots or other sites.
 set -euo pipefail
 
-PORT="${PARROT_HTTP_PORT:-8090}"
+PORT="${XANDER_HTTP_PORT:-8090}"
 CONF="/etc/apache2/sites-available/xander-academy-elearning.conf"
 
 echo "==> Existing /var/www (left unchanged):"

@@ -4,6 +4,7 @@ namespace App\Services\Meetings;
 
 use App\Enums\MeetingProvider;
 use App\Exceptions\Meetings\ProviderNotConfiguredException;
+use App\Support\MeetingSettingsMapper;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -265,6 +266,36 @@ class DailyApiService
         }
 
         return $response;
+    }
+
+    /**
+     * Create a classroom room from normalized meeting settings, retrying without cloud recording if needed.
+     *
+     * @param  array<string, bool|string>  $settings
+     * @param  array<string, mixed>  $overrides
+     * @return array<string, mixed>
+     */
+    public function createClassroomRoom(string $roomName, array $settings, array $overrides = []): array
+    {
+        $properties = $this->classroomRoomProperties(
+            MeetingSettingsMapper::dailyRoomProperties($settings, $overrides),
+        );
+
+        try {
+            return $this->createRoom($roomName, $properties);
+        } catch (\Throwable $e) {
+            if (!array_key_exists('enable_recording', $properties)) {
+                throw $e;
+            }
+
+            unset($properties['enable_recording']);
+            Log::warning('Daily room create retry without cloud recording', [
+                'room' => $roomName,
+                'error' => $e->getMessage(),
+            ]);
+
+            return $this->createRoom($roomName, $properties);
+        }
     }
 
     /**

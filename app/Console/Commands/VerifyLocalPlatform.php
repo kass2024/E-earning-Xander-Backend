@@ -19,7 +19,7 @@ class VerifyLocalPlatform extends Command
 
     public function handle(): int
     {
-        $this->info('Parrot platform — local pre-deploy verification');
+        $this->info('Xander platform — local pre-deploy verification');
         $this->newLine();
 
         if ($this->option('seed')) {

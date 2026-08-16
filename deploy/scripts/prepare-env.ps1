@@ -39,10 +39,10 @@ $override = @{
     "DB_HOST"           = "mysql"
     "DB_PORT"           = "3306"
     "DB_DATABASE"       = "learning_xander"
-    "DB_USERNAME"       = "parrot"
+    "DB_USERNAME"       = "xander"
     "AUTO_MIGRATE"      = "true"
     "AUTO_SEED_DEMO"    = "false"
-    "PARROT_HTTP_PORT"  = "8090"
+    "XANDER_HTTP_PORT"  = "8090"
     "MAIL_HOST"         = "xanderglobalacademy.com"
 }
 

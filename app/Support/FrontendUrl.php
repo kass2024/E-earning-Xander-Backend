@@ -11,6 +11,15 @@ class FrontendUrl
     {
         $explicit = rtrim((string) config('app.frontend_url', ''), '/');
         if ($explicit !== '') {
+            // Legacy Parrot/e-learning.school env on xanderglobalacademy.com VPS.
+            if (in_array(strtolower($explicit), [
+                'https://e-learning.school',
+                'http://e-learning.school',
+                'https://www.e-learning.school',
+            ], true)) {
+                return 'https://xanderglobalacademy.com';
+            }
+
             return $explicit;
         }
 
@@ -18,6 +27,14 @@ class FrontendUrl
 
         // Xander production: API on api.xanderglobalscholars.com → learner app on xanderglobalacademy.com
         if ($appUrl !== '' && preg_match('#^https?://api\.xanderglobalscholars\.com#i', $appUrl)) {
+            return 'https://xanderglobalacademy.com';
+        }
+
+        if ($appUrl !== '' && preg_match('#^https?://api\.xanderglobalacademy\.com#i', $appUrl)) {
+            return 'https://xanderglobalacademy.com';
+        }
+
+        if ($appUrl !== '' && preg_match('#^https?://api\.e-learning\.school#i', $appUrl)) {
             return 'https://xanderglobalacademy.com';
         }
 

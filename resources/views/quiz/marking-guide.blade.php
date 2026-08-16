@@ -100,6 +100,6 @@
         </tbody>
     </table>
 
-    <p class="footnote">Parrot Academy — automated marking guide. Use your browser’s Print dialog and choose “Save as PDF” to download this report.</p>
+    <p class="footnote">Xander Academy — automated marking guide. Use your browser’s Print dialog and choose “Save as PDF” to download this report.</p>
 </body>
 </html>
