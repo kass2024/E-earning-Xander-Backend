@@ -619,7 +619,8 @@ class MeetingRegistrationController extends Controller
             ->where(function ($q) {
                 $q->whereNull('status')
                     ->orWhereRaw("LOWER(COALESCE(status, 'pending')) = 'approved'")
-                    ->orWhereRaw("LOWER(COALESCE(status, 'pending')) = 'pending'");
+                    ->orWhereRaw("LOWER(COALESCE(status, 'pending')) = 'pending'")
+                    ->orWhereRaw("LOWER(COALESCE(status, 'pending')) = 'pending_payment'");
             });
         WebinarTenant::scopeRegistrations($query, $institutionId);
 
@@ -1325,9 +1326,15 @@ class MeetingRegistrationController extends Controller
                 $createRegistration['platform_institution_id'] = $tenantInstitutionId;
             }
 
-            // Auto-approve on registration; Zoom + confirmation email run after the HTTP response.
+            // Hold the slot until payment succeeds; Zoom + confirmation email run after payment.
+            $paymentService = app(\App\Services\MeetingBookingPaymentService::class);
+            $paymentRequired = $paymentService->paymentRequired();
+
             if (Schema::hasColumn('meeting_registrations', 'status')) {
-                $createRegistration['status'] = 'Approved';
+                $createRegistration['status'] = $paymentRequired ? 'pending_payment' : 'Approved';
+            }
+            if (Schema::hasColumn('meeting_registrations', 'payment_status')) {
+                $createRegistration['payment_status'] = $paymentRequired ? 'pending' : 'waived';
             }
             if (Schema::hasColumn('meeting_registrations', 'schedule_label') && $scheduleLabelFromForm) {
                 $createRegistration['schedule_label'] = $scheduleLabelFromForm;
@@ -1347,10 +1354,22 @@ class MeetingRegistrationController extends Controller
 
             $registration = MeetingRegistration::create($createRegistration);
 
-            ProvisionMeetingRegistrationJob::dispatch($registration->id, $scheduleLabelFromForm)->afterResponse();
+            if (!$paymentRequired) {
+                ProvisionMeetingRegistrationJob::dispatch($registration->id, $scheduleLabelFromForm)->afterResponse();
+
+                return response()->json([
+                    'message' => 'Booking confirmed. A confirmation email with your meeting link will arrive shortly.',
+                    'payment_required' => false,
+                    'role' => $user->role,
+                    'user' => $user,
+                    'registration' => $registration->fresh(),
+                ], 201);
+            }
 
             return response()->json([
-                'message' => 'Booking confirmed. A confirmation email with your meeting link will arrive shortly.',
+                'message' => 'Details saved. Complete payment with Stripe or Mobile Money to confirm your booking.',
+                'payment_required' => true,
+                'payment' => $paymentService->publicConfig(),
                 'role' => $user->role,
                 'user' => $user,
                 'registration' => $registration->fresh(),

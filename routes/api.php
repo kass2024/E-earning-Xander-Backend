@@ -370,6 +370,10 @@ Route::prefix('admin')->group(function () {
     Route::get('payments', [PaymentController::class, 'index']);
     Route::get('payments/config', [PaymentController::class, 'paymentConfig']);
     Route::get('payments/stripe-config', [PaymentController::class, 'stripeConfig']);
+    Route::get('payments/meeting/config', [PaymentController::class, 'meetingPaymentConfig']);
+    Route::post('payments/meeting/create-checkout', [PaymentController::class, 'createMeetingCheckout']);
+    Route::post('payments/meeting/confirm-checkout', [PaymentController::class, 'confirmMeetingCheckout']);
+    Route::post('payments/meeting/momo/request', [PaymentController::class, 'requestMeetingMomo']);
     Route::get('course-promo-codes', [PaymentController::class, 'promoCodes']);
     Route::post('course-promo-codes', [PaymentController::class, 'storePromoCode']);
     Route::patch('course-promo-codes/{coursePromoCode}', [PaymentController::class, 'updatePromoCode']);

@@ -18,6 +18,10 @@ class MeetingRegistration extends Model
         'country',
         'notes',
         'status',
+        'payment_status',
+        'payment_provider',
+        'payment_reference',
+        'paid_at',
         'cancel_token',
         'rejected_reason',
         'zoom_meeting_id',
@@ -31,6 +35,7 @@ class MeetingRegistration extends Model
         'zoom_start_time' => 'datetime',
         'reminder_sent_at' => 'datetime',
         'final_reminder_sent_at' => 'datetime',
+        'paid_at' => 'datetime',
         'platform_institution_id' => 'integer',
     ];
 

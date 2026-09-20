@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\SiteSetting;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 
 class PaymentSettingsController extends Controller
 {
@@ -17,11 +18,23 @@ class PaymentSettingsController extends Controller
 
     public function update(Request $request)
     {
-        $data = $request->validate([
+        $rules = [
             'momo_receiver_phone' => 'required|string|min:9|max:32',
             'momo_receiver_name' => 'nullable|string|max:120',
             'momo_whatsapp_phone' => 'nullable|string|max:32',
-        ]);
+        ];
+
+        if (Schema::hasColumn('site_settings', 'meeting_fee_usd')) {
+            $rules['meeting_fee_usd'] = 'nullable|numeric|min:0|max:99999';
+        }
+        if (Schema::hasColumn('site_settings', 'meeting_fee_rwf')) {
+            $rules['meeting_fee_rwf'] = 'nullable|integer|min:0|max:100000000';
+        }
+        if (Schema::hasColumn('site_settings', 'meeting_payment_required')) {
+            $rules['meeting_payment_required'] = 'nullable|boolean';
+        }
+
+        $data = $request->validate($rules);
 
         $digits = preg_replace('/\D+/', '', $data['momo_receiver_phone']) ?: '';
         if (strlen($digits) < 9) {
@@ -36,10 +49,19 @@ class PaymentSettingsController extends Controller
         if (array_key_exists('momo_whatsapp_phone', $data)) {
             $settings->momo_whatsapp_phone = $data['momo_whatsapp_phone'] ?: null;
         }
+        if (Schema::hasColumn('site_settings', 'meeting_fee_usd') && array_key_exists('meeting_fee_usd', $data)) {
+            $settings->meeting_fee_usd = $data['meeting_fee_usd'];
+        }
+        if (Schema::hasColumn('site_settings', 'meeting_fee_rwf') && array_key_exists('meeting_fee_rwf', $data)) {
+            $settings->meeting_fee_rwf = $data['meeting_fee_rwf'];
+        }
+        if (Schema::hasColumn('site_settings', 'meeting_payment_required') && array_key_exists('meeting_payment_required', $data)) {
+            $settings->meeting_payment_required = (bool) $data['meeting_payment_required'];
+        }
         $settings->save();
 
         return response()->json([
-            'message' => 'Mobile Money receive number updated',
+            'message' => 'Payment settings updated',
             'payment_receiver' => $settings->fresh()->paymentReceiverPayload(),
         ], 200);
     }

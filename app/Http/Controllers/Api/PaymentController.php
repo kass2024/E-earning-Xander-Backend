@@ -7,9 +7,11 @@ use App\Models\Course;
 use App\Models\CourseEnrollment;
 use App\Models\CoursePayment;
 use App\Models\CoursePromoCode;
+use App\Models\MeetingRegistration;
 use App\Support\ApiListCache;
 use App\Support\EnrollmentStatusHelper;
 use App\Support\PlatformTenantScope;
+use App\Services\MeetingBookingPaymentService;
 use App\Services\MopayPaymentService;
 use App\Services\StripePaymentService;
 use Illuminate\Http\Request;
@@ -21,6 +23,7 @@ class PaymentController extends Controller
     public function __construct(
         private readonly MopayPaymentService $mopayPayments,
         private readonly StripePaymentService $stripePayments,
+        private readonly MeetingBookingPaymentService $meetingPayments,
     ) {
     }
 
@@ -216,9 +219,84 @@ class PaymentController extends Controller
     /** Poll MoPay + activate course when webhook is delayed. */
     public function momoStatus(string $reference)
     {
+        $meeting = $this->meetingPayments->findByExternalReference($reference);
+        if ($meeting) {
+            $result = $this->meetingPayments->syncMomoFromGateway($reference);
+
+            return response()->json($result, !empty($result['ok']) ? 200 : 404);
+        }
+
         $result = $this->mopayPayments->syncPaymentFromGateway($reference);
 
         return response()->json($result, !empty($result['ok']) ? 200 : 404);
+    }
+
+    public function meetingPaymentConfig()
+    {
+        return response()->json($this->meetingPayments->publicConfig(), 200);
+    }
+
+    public function createMeetingCheckout(Request $request)
+    {
+        $validated = $request->validate([
+            'meeting_registration_id' => 'required|integer|exists:meeting_registrations,id',
+        ]);
+
+        $registration = MeetingRegistration::findOrFail($validated['meeting_registration_id']);
+        $result = $this->meetingPayments->createStripeCheckout($registration);
+
+        if (empty($result['ok'])) {
+            return response()->json([
+                'message' => $result['message'] ?? 'Unable to start Stripe checkout.',
+            ], $result['status'] ?? 500);
+        }
+
+        return response()->json([
+            'url' => $result['url'],
+            'session_id' => $result['session_id'] ?? null,
+        ]);
+    }
+
+    public function confirmMeetingCheckout(Request $request)
+    {
+        $validated = $request->validate([
+            'session_id' => 'required|string',
+        ]);
+
+        $result = $this->meetingPayments->confirmStripeCheckout($validated['session_id']);
+
+        if (empty($result['ok'])) {
+            return response()->json([
+                'message' => $result['message'] ?? 'Unable to confirm payment.',
+            ], $result['status'] ?? 500);
+        }
+
+        return response()->json($result);
+    }
+
+    public function requestMeetingMomo(Request $request)
+    {
+        $validated = $request->validate([
+            'meeting_registration_id' => 'required|integer|exists:meeting_registrations,id',
+            'phone' => 'required|string|min:9|max:20',
+            'mno' => 'nullable|string|in:mtn,airtel',
+        ]);
+
+        $registration = MeetingRegistration::findOrFail($validated['meeting_registration_id']);
+        $result = $this->meetingPayments->requestMomo(
+            $registration,
+            $validated['phone'],
+            $validated['mno'] ?? 'mtn'
+        );
+
+        if (empty($result['ok'])) {
+            return response()->json([
+                'message' => $result['message'] ?? 'Unable to start Mobile Money payment.',
+                'transaction_id' => $result['transaction_id'] ?? null,
+            ], $result['status'] ?? 500);
+        }
+
+        return response()->json($result);
     }
 
     public function applyPromo(Request $request)
@@ -401,6 +479,14 @@ class PaymentController extends Controller
                         'transactionId' => $fallbackTid,
                     ], 200);
                 }
+                $meeting = $this->meetingPayments->syncMomoFromGateway($fallbackTid);
+                if (!empty($meeting['ok']) && (($meeting['payment']['status'] ?? '') === 'paid')) {
+                    return response()->json([
+                        'status' => 200,
+                        'message' => 'Meeting booking payment confirmed via gateway status',
+                        'transactionId' => $fallbackTid,
+                    ], 200);
+                }
             }
 
             return response()->json(['status' => 401, 'message' => $e->getMessage()], 401);
@@ -431,9 +517,10 @@ class PaymentController extends Controller
         $knownExternal = \App\Models\ExternalCoursePayment::where('external_reference', $transactionId)
             ->orWhere('external_reference', $baseRef)
             ->exists();
+        $knownMeeting = $this->meetingPayments->findByExternalReference($transactionId) !== null;
 
         // MoPay validates the callback URL by expecting 404 for unknown transactions.
-        if (!$knownLearner && !$knownExternal) {
+        if (!$knownLearner && !$knownExternal && !$knownMeeting) {
             return response()->json([
                 'status' => 404,
                 'message' => 'Transaction not found',
@@ -458,6 +545,9 @@ class PaymentController extends Controller
                 $this->mopayPayments->handleWebhookSuccess($transactionId, $payloadBody);
                 ApiListCache::bump('payments');
             }
+            if ($knownMeeting) {
+                $this->meetingPayments->handleWebhookSuccess($transactionId, $payloadBody);
+            }
         } elseif ($failed) {
             $friendly = $gateway->humanizeError($payloadBody);
             // Only mark failed on explicit failure — keep processing while PIN prompt is pending.
@@ -468,6 +558,9 @@ class PaymentController extends Controller
             if ($knownExternal) {
                 app(\App\Services\ExternalPayNowService::class)
                     ->handleWebhookFailure($transactionId, $payloadBody, $friendly);
+            }
+            if ($knownMeeting) {
+                $this->meetingPayments->handleWebhookFailure($transactionId, $payloadBody, $friendly);
             }
 
             return response()->json([

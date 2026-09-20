@@ -26,6 +26,9 @@ class SiteSetting extends Model
         'momo_receiver_phone',
         'momo_receiver_name',
         'momo_whatsapp_phone',
+        'meeting_fee_usd',
+        'meeting_fee_rwf',
+        'meeting_payment_required',
     ];
 
     protected $casts = [
@@ -35,11 +38,14 @@ class SiteSetting extends Model
         'promo_banner_show_coupon' => 'boolean',
         'star_banner_published' => 'boolean',
         'star_banner_expires_at' => 'datetime',
+        'meeting_fee_usd' => 'float',
+        'meeting_fee_rwf' => 'integer',
+        'meeting_payment_required' => 'boolean',
     ];
 
     public static function current(): self
     {
-        return static::query()->firstOrCreate([], [
+        $defaults = [
             'promo_banner_published' => false,
             'promo_banner_background_color' => '#254D81',
             'promo_banner_show_countdown' => true,
@@ -50,7 +56,19 @@ class SiteSetting extends Model
             'momo_receiver_phone' => null,
             'momo_receiver_name' => null,
             'momo_whatsapp_phone' => null,
-        ]);
+        ];
+
+        if (\Illuminate\Support\Facades\Schema::hasColumn('site_settings', 'meeting_fee_usd')) {
+            $defaults['meeting_fee_usd'] = 10;
+        }
+        if (\Illuminate\Support\Facades\Schema::hasColumn('site_settings', 'meeting_fee_rwf')) {
+            $defaults['meeting_fee_rwf'] = 10000;
+        }
+        if (\Illuminate\Support\Facades\Schema::hasColumn('site_settings', 'meeting_payment_required')) {
+            $defaults['meeting_payment_required'] = true;
+        }
+
+        return static::query()->firstOrCreate([], $defaults);
     }
 
     /** Digits-only MoMo phone for MoPay transfer destination (Xander's single receiver). */
@@ -119,13 +137,28 @@ class SiteSetting extends Model
     {
         $digits = $this->resolvedMomoReceiverPhone();
 
-        return [
+        $payload = [
             'momo_receiver_phone' => $this->momo_receiver_phone ?: ($digits !== '' ? $this->formatDisplayPhone($digits) : ''),
             'momo_receiver_name' => $this->resolvedMomoReceiverName(),
             'momo_whatsapp_phone' => $this->momo_whatsapp_phone ?: $this->resolvedMomoWhatsappPhone(),
             'display_momo_phone' => $digits !== '' ? $this->formatDisplayPhone($digits) : '',
             'display_whatsapp_phone' => $this->resolvedMomoWhatsappPhone(),
+            'meeting_fee_usd' => (float) config('services.meeting_booking.fee_usd', 10),
+            'meeting_fee_rwf' => (int) config('services.meeting_booking.fee_rwf', 10000),
+            'meeting_payment_required' => true,
         ];
+
+        if (\Illuminate\Support\Facades\Schema::hasColumn('site_settings', 'meeting_fee_usd') && $this->meeting_fee_usd !== null) {
+            $payload['meeting_fee_usd'] = (float) $this->meeting_fee_usd;
+        }
+        if (\Illuminate\Support\Facades\Schema::hasColumn('site_settings', 'meeting_fee_rwf') && $this->meeting_fee_rwf !== null) {
+            $payload['meeting_fee_rwf'] = (int) $this->meeting_fee_rwf;
+        }
+        if (\Illuminate\Support\Facades\Schema::hasColumn('site_settings', 'meeting_payment_required')) {
+            $payload['meeting_payment_required'] = (bool) ($this->meeting_payment_required ?? true);
+        }
+
+        return $payload;
     }
 
     public function promoBannerPayload(): array

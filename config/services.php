@@ -62,9 +62,14 @@ return [
     ],
 
     'stripe' => [
-        // Using keys already defined in .env
+        // Using keys already defined in .env (Xander Stripe account — do not reuse Parrot keys)
         'secret' => env('STRIPE_SECRET_KEY'),
         'key'    => env('STRIPE_PUBLIC_KEY'),
+    ],
+
+    'meeting_booking' => [
+        'fee_usd' => (float) env('MEETING_BOOKING_FEE_USD', 10),
+        'fee_rwf' => (int) env('MEETING_BOOKING_FEE_RWF', 10000),
     ],
 
     /*
