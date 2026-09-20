@@ -36,7 +36,7 @@ class MeetingBookingPaymentService
         return $this->stripe ?? app(StripePaymentService::class);
     }
 
-    /** @return array{required:bool,fee_usd:float,fee_rwf:int,usd_rwf_rate:float,forex_source:string,forex_as_of:?string,forex_live:bool,stripe_configured:bool,mopay_configured:bool,receiver:?array} */
+    /** @return array{required:bool,fee_usd:float,fee_rwf:int,stripe_configured:bool,mopay_configured:bool} */
     public function publicConfig(): array
     {
         $settings = SiteSetting::current();
@@ -50,16 +50,8 @@ class MeetingBookingPaymentService
             'required' => $required,
             'fee_usd' => $feeUsd,
             'fee_rwf' => $feeRwf,
-            'usd_rwf_rate' => $quote['rate'],
-            'forex_source' => $quote['source'],
-            'forex_as_of' => $quote['as_of'],
-            'forex_live' => $quote['live'],
             'stripe_configured' => $this->stripeService()->isConfigured(),
             'mopay_configured' => $this->mopay()->isConfigured() && !empty($receiver['receiver_account_no']),
-            'receiver' => [
-                'display_momo_phone' => $receiver['display_momo_phone'] ?? '',
-                'momo_receiver_name' => $receiver['momo_receiver_name'] ?? '',
-            ],
         ];
     }
 
