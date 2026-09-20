@@ -117,6 +117,17 @@ class MeetingRegistrationNotificationService
                     'to' => $to,
                 ]);
             } elseif (strtolower($status) === 'approved') {
+                if (!app(MeetingBookingPaymentService::class)->canFulfillBooking($meetingRegistration)) {
+                    Log::info('Skip appointment confirmation email until payment is complete', [
+                        'meeting_registration_id' => $meetingRegistration->id ?? null,
+                        'to' => $to,
+                        'status' => $meetingRegistration->status ?? null,
+                        'payment_status' => $meetingRegistration->payment_status ?? null,
+                    ]);
+
+                    return;
+                }
+
                 $meetingRegistration = $this->ensureCancelToken($meetingRegistration);
 
                 $effectiveJoinUrl = $joinUrl;
@@ -252,6 +263,10 @@ class MeetingRegistrationNotificationService
     {
         $to = $meetingRegistration->email;
         if (!$to) {
+            return;
+        }
+
+        if (!app(MeetingBookingPaymentService::class)->canFulfillBooking($meetingRegistration)) {
             return;
         }
 

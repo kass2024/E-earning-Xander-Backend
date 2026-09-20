@@ -427,6 +427,10 @@ class MeetingRegistrationController extends Controller
                     'to' => $to,
                 ]);
             } elseif (strtolower($status) === 'approved') {
+                if (!app(\App\Services\MeetingBookingPaymentService::class)->canFulfillBooking($meetingRegistration)) {
+                    return;
+                }
+
                 $effectiveJoinUrl = $joinUrl;
                 if (!$effectiveJoinUrl && !empty($meetingRegistration->zoom_join_url)) {
                     $effectiveJoinUrl = $meetingRegistration->zoom_join_url;

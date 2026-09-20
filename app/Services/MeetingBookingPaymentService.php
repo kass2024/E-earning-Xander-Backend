@@ -121,6 +121,15 @@ class MeetingBookingPaymentService
     }
 
     /**
+     * Zoom, Daily, and the "appointment is confirmed" email must wait until the booking is paid
+     * whenever meeting payment is required.
+     */
+    public function canFulfillBooking(MeetingRegistration $registration): bool
+    {
+        return $this->registrationIsPaid($registration);
+    }
+
+    /**
      * Mark registration paid and provision the meeting (Zoom/Daily + email).
      */
     public function activateAfterPayment(MeetingRegistration $registration, string $provider, ?string $reference = null): void

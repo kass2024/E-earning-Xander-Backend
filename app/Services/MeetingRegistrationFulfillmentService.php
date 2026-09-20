@@ -31,6 +31,16 @@ class MeetingRegistrationFulfillmentService
             return;
         }
 
+        if (!app(MeetingBookingPaymentService::class)->canFulfillBooking($registration)) {
+            Log::info('Skip meeting provision until payment is complete', [
+                'meeting_registration_id' => $registrationId,
+                'status' => $registration->status ?? null,
+                'payment_status' => $registration->payment_status ?? null,
+            ]);
+
+            return;
+        }
+
         try {
             $zoomResult = $this->provisionZoomForRegistration($registration);
             $this->notifications->sendStatusEmail(
@@ -58,6 +68,14 @@ class MeetingRegistrationFulfillmentService
             return;
         }
 
+        if (!app(MeetingBookingPaymentService::class)->canFulfillBooking($registration)) {
+            Log::info('Skip meeting approval provision until payment is complete', [
+                'meeting_registration_id' => $registrationId,
+            ]);
+
+            return;
+        }
+
         try {
             $zoomResult = $this->provisionZoomForRegistration($registration);
             $this->notifications->sendStatusEmail(
@@ -81,6 +99,14 @@ class MeetingRegistrationFulfillmentService
             ->find($registrationId);
 
         if (!$registration || !$registration->email) {
+            return;
+        }
+
+        if (!app(MeetingBookingPaymentService::class)->canFulfillBooking($registration)) {
+            Log::info('Skip join-link resend until payment is complete', [
+                'meeting_registration_id' => $registrationId,
+            ]);
+
             return;
         }
 
