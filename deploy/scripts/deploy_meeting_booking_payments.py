@@ -152,6 +152,12 @@ do
   echo copied:$f
 done
 
+echo '=== COMPOSER AUTOLOAD ==='
+docker exec "$B" composer dump-autoload -o --no-dev --quiet || docker exec "$B" composer dump-autoload --quiet || true
+if docker ps --format '{{.Names}}' | grep -qx "$S"; then
+  docker exec "$S" composer dump-autoload -o --no-dev --quiet || true
+fi
+
 echo '=== MEETING FEE ENV ONLY (do not touch STRIPE_*) ==='
 ensure_fee() {
   local file="$1"

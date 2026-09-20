@@ -19,6 +19,18 @@ class LiveUsdRwfRateService
     /** @return array{rate:float,source:string,as_of:?string,live:bool} */
     public function quote(): array
     {
+        try {
+            return $this->quoteUnsafe();
+        } catch (\Throwable $e) {
+            Log::warning('USD/RWF forex quote failed', ['error' => $e->getMessage()]);
+
+            return $this->fallbackQuote();
+        }
+    }
+
+    /** @return array{rate:float,source:string,as_of:?string,live:bool} */
+    private function quoteUnsafe(): array
+    {
         $cached = Cache::get(self::CACHE_KEY);
         if (is_array($cached) && $this->validRate($cached['rate'] ?? null)) {
             return [
@@ -59,10 +71,16 @@ class LiveUsdRwfRateService
             ];
         }
 
+        return $this->fallbackQuote();
+    }
+
+    /** @return array{rate:float,source:string,as_of:?string,live:bool} */
+    private function fallbackQuote(): array
+    {
         $fallback = (float) config('services.meeting_booking.usd_rwf_fallback', 1450);
 
         return [
-            'rate' => $fallback,
+            'rate' => $fallback > 0 ? $fallback : 1450.0,
             'source' => 'fallback',
             'as_of' => null,
             'live' => false,
@@ -96,8 +114,8 @@ class LiveUsdRwfRateService
 
     private function httpGet(string $url): ?array
     {
-        $response = Http::timeout(8)
-            ->connectTimeout(5)
+        $response = Http::timeout(4)
+            ->connectTimeout(3)
             ->acceptJson()
             ->get($url);
 
