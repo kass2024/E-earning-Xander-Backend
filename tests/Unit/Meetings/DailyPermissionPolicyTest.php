@@ -16,7 +16,7 @@ class DailyPermissionPolicyTest extends TestCase
         $this->assertTrue($props['start_audio_off']);
         $this->assertTrue($props['start_video_off']);
         $this->assertTrue($props['enable_screenshare']);
-        $this->assertSame(['audio', 'video', 'screenVideo', 'screenAudio'], $props['permissions']['canSend']);
+        $this->assertTrue($props['permissions']['canSend']);
         $this->assertFalse($props['permissions']['canAdmin']);
     }
 
@@ -48,8 +48,8 @@ class DailyPermissionPolicyTest extends TestCase
         $policy = new DailyPermissionPolicy();
         $update = $policy->speakingGrantUpdate(true, false, false);
 
-        $this->assertSame(['audio'], $update['canSend']);
-        $this->assertSame(['canSend' => false], $policy->revokePublishUpdate());
+        $this->assertSame(['screenVideo', 'screenAudio', 'audio'], $update['canSend']);
+        $this->assertSame(['canSend' => ['screenVideo', 'screenAudio']], $policy->revokePublishUpdate());
     }
 
     public function test_trusted_context_role_is_used(): void

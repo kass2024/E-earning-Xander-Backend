@@ -35,4 +35,5 @@ return [
     'meet_subscriptions' => ['id', 'plan_id', 'status', 'billing_provider'],
     'meet_usage_credits' => ['id', 'subscription_id', 'credits_allocated', 'credits_used'],
     'meet_subscription_payments' => ['id', 'subscription_id', 'plan_id', 'status', 'provider'],
+    'meet_subscription_promo_codes' => ['id', 'code', 'max_uses', 'uses_count', 'is_active', 'plan_id'],
 ];

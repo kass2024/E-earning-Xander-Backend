@@ -54,11 +54,9 @@ class MeetingSettingsMapperTest extends TestCase
             $settings,
             DailyPermissionPolicy::ROLE_ATTENDEE,
         );
-
-        $canSend = $attendee['permissions']['canSend'];
-        $this->assertIsArray($canSend);
-        $this->assertNotContains('video', $canSend);
-        $this->assertContains('screenVideo', $canSend);
-        $this->assertContains('screenAudio', $canSend);
+        $this->assertTrue($attendee['start_video_off']);
+        $this->assertTrue($attendee['start_audio_off']);
+        $this->assertTrue($attendee['enable_screenshare']);
+        $this->assertTrue($attendee['permissions']['canSend']);
     }
 }

@@ -47,6 +47,8 @@ docker rm -f meet_nginx meet_frontend meet_backend meet_scheduler meet_mysql 2>/
 docker compose -f docker-compose.prod.yml --env-file .env.production down 2>/dev/null || true
 docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
 
+docker exec -u root meet_backend sh -c 'mkdir -p /var/www/html/storage/logs /var/www/html/bootstrap/cache && chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache && chmod -R ug+rwx /var/www/html/storage /var/www/html/bootstrap/cache' || true
+
 docker exec meet_backend php artisan migrate --force 2>/dev/null || true
 docker exec meet_backend php artisan db:seed --class=MeetSubscriptionPlanSeeder --force 2>/dev/null || true
 

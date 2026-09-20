@@ -55,7 +55,8 @@ return [
         'stack' => [
             'driver' => 'stack',
             'channels' => explode(',', (string) env('LOG_STACK', 'single')),
-            'ignore_exceptions' => false,
+            // Never let a log write (e.g. storage/logs permission denied) fail a request.
+            'ignore_exceptions' => true,
         ],
 
         'single' => [
