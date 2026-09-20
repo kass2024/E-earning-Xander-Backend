@@ -69,7 +69,8 @@ return [
 
     'meeting_booking' => [
         'fee_usd' => (float) env('MEETING_BOOKING_FEE_USD', 10),
-        'fee_rwf' => (int) env('MEETING_BOOKING_FEE_RWF', 10000),
+        // MoMo RWF is converted from fee_usd at the live USD/RWF rate.
+        'usd_rwf_fallback' => (float) env('USD_RWF_FALLBACK_RATE', 1450),
     ],
 
     /*

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\SiteSetting;
+use App\Services\LiveUsdRwfRateService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
 
@@ -27,9 +28,6 @@ class PaymentSettingsController extends Controller
         if (Schema::hasColumn('site_settings', 'meeting_fee_usd')) {
             $rules['meeting_fee_usd'] = 'nullable|numeric|min:0|max:99999';
         }
-        if (Schema::hasColumn('site_settings', 'meeting_fee_rwf')) {
-            $rules['meeting_fee_rwf'] = 'nullable|integer|min:0|max:100000000';
-        }
         if (Schema::hasColumn('site_settings', 'meeting_payment_required')) {
             $rules['meeting_payment_required'] = 'nullable|boolean';
         }
@@ -51,9 +49,10 @@ class PaymentSettingsController extends Controller
         }
         if (Schema::hasColumn('site_settings', 'meeting_fee_usd') && array_key_exists('meeting_fee_usd', $data)) {
             $settings->meeting_fee_usd = $data['meeting_fee_usd'];
-        }
-        if (Schema::hasColumn('site_settings', 'meeting_fee_rwf') && array_key_exists('meeting_fee_rwf', $data)) {
-            $settings->meeting_fee_rwf = $data['meeting_fee_rwf'];
+            if (Schema::hasColumn('site_settings', 'meeting_fee_rwf')) {
+                $settings->meeting_fee_rwf = app(LiveUsdRwfRateService::class)
+                    ->convertUsdToRwf((float) $data['meeting_fee_usd']);
+            }
         }
         if (Schema::hasColumn('site_settings', 'meeting_payment_required') && array_key_exists('meeting_payment_required', $data)) {
             $settings->meeting_payment_required = (bool) $data['meeting_payment_required'];

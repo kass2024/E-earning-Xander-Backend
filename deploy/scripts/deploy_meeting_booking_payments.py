@@ -20,6 +20,8 @@ REMOTE = "/opt/e-learning-xander"
 BACKEND_FILES = [
     "app/Models/MeetingPayment.php",
     "app/Services/MeetingBookingPaymentService.php",
+    "app/Services/LiveUsdRwfRateService.php",
+    "app/Providers/AppServiceProvider.php",
     "database/migrations/2026_09_03_140000_add_meeting_booking_payments.php",
     "app/Models/MeetingRegistration.php",
     "app/Models/SiteSetting.php",
@@ -132,6 +134,8 @@ echo '=== HOT COPY BACKEND ==='
 for f in \
   app/Models/MeetingPayment.php \
   app/Services/MeetingBookingPaymentService.php \
+  app/Services/LiveUsdRwfRateService.php \
+  app/Providers/AppServiceProvider.php \
   database/migrations/2026_09_03_140000_add_meeting_booking_payments.php \
   app/Models/MeetingRegistration.php \
   app/Models/SiteSetting.php \
@@ -155,18 +159,18 @@ ensure_fee() {
   if ! docker exec "$B" grep -q '^MEETING_BOOKING_FEE_USD=' "$file"; then
     docker exec "$B" sh -c "echo 'MEETING_BOOKING_FEE_USD=10' >> $file"
   fi
-  if ! docker exec "$B" grep -q '^MEETING_BOOKING_FEE_RWF=' "$file"; then
-    docker exec "$B" sh -c "echo 'MEETING_BOOKING_FEE_RWF=10000' >> $file"
+  if ! docker exec "$B" grep -q '^USD_RWF_FALLBACK_RATE=' "$file"; then
+    docker exec "$B" sh -c "echo 'USD_RWF_FALLBACK_RATE=1450' >> $file"
   fi
 }
 ensure_fee /var/www/html/.env
 if [ -f /opt/e-learning-xander/E-learning-parrot-backend/deploy/.env.production ]; then
   ENVF=/opt/e-learning-xander/E-learning-parrot-backend/deploy/.env.production
   grep -q '^MEETING_BOOKING_FEE_USD=' "$ENVF" || echo 'MEETING_BOOKING_FEE_USD=10' >> "$ENVF"
-  grep -q '^MEETING_BOOKING_FEE_RWF=' "$ENVF" || echo 'MEETING_BOOKING_FEE_RWF=10000' >> "$ENVF"
+  grep -q '^USD_RWF_FALLBACK_RATE=' "$ENVF" || echo 'USD_RWF_FALLBACK_RATE=1450' >> "$ENVF"
 fi
 docker exec "$B" sh -c "grep -E '^STRIPE_(SECRET|PUBLIC)_KEY=' /var/www/html/.env | sed 's/=.*/=***xander***/'"
-docker exec "$B" sh -c "grep -E '^MEETING_BOOKING_FEE_' /var/www/html/.env || true"
+docker exec "$B" sh -c "grep -E '^MEETING_BOOKING_FEE_USD=|^USD_RWF_FALLBACK_RATE=' /var/www/html/.env || true"
 
 echo '=== MIGRATE + CLEAR ==='
 docker exec "$B" sh -c '
@@ -184,14 +188,13 @@ docker compose -f docker-compose.prod.yml --env-file .env.production up -d --bui
 echo FE_EXIT:$?
 tail -n 50 /tmp/xander-meeting-pay-fe.log
 
-echo '=== VERIFY STRINGS ==='
-docker exec "$B" php artisan tinker --execute="echo 'svc='.(class_exists('App\\\\Services\\\\MeetingBookingPaymentService')?'yes':'no').' tbl='.(\\Illuminate\\\\Support\\\\Facades\\\\Schema::hasTable('meeting_payments')?'yes':'no').' col='.(\\Illuminate\\\\Support\\\\Facades\\\\Schema::hasColumn('meeting_registrations','payment_status')?'yes':'no').' stripe_xander='.(str_contains((string)config('services.stripe.secret'),'SfEcq')?'yes':'no');"
-
+echo '=== VERIFY ==='
+docker exec "$B" php -r 'require "/var/www/html/vendor/autoload.php"; echo class_exists("App\\Services\\LiveUsdRwfRateService") ? "forex_svc=yes\n" : "forex_svc=no\n";'
 echo '=== HTTP ==='
-curl -sk -o /dev/null -w 'up:%{http_code}\n' --resolve api.e-learning.school:443:127.0.0.1 https://api.e-learning.school/api/admin/system/health || true
-curl -sk -o /dev/null -w 'mtgcfg:%{http_code}\n' --resolve api.e-learning.school:443:127.0.0.1 https://api.e-learning.school/api/admin/payments/meeting/config || true
+curl -sk -o /tmp/mtg.json -w 'mtgcfg:%{http_code}\n' --resolve api.e-learning.school:443:127.0.0.1 https://api.e-learning.school/api/admin/payments/meeting/config || true
+php -r '$j=json_decode(@file_get_contents("/tmp/mtg.json"),true); echo "stripe=".(!empty($j["stripe_configured"])?"yes":"no")." live=".(!empty($j["forex_live"])?"yes":"no")." rate=".($j["usd_rwf_rate"]??"?")." usd=".($j["fee_usd"]??"?")." rwf=".($j["fee_rwf"]??"?")."\n";'
 curl -s -o /dev/null -w 'local8090:%{http_code}\n' -H 'Host: www.e-learning.school' http://127.0.0.1:8090/meeting-registration || true
-docker exec "$F" sh -c "grep -R -m1 -a 'Pay to confirm booking' /usr/share/nginx/html >/dev/null 2>&1 && echo fe_pay_text:yes || echo fe_pay_text:no"
+docker exec "$F" sh -c "grep -R -m1 -a 'live forex' /usr/share/nginx/html >/dev/null 2>&1 && echo fe_forex_text:yes || echo fe_forex_text:no"
 echo DONE
 """
     code = run(c, cmd, timeout=3600)

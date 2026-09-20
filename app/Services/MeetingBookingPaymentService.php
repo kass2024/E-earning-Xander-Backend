@@ -6,6 +6,7 @@ use App\Jobs\ProvisionMeetingRegistrationJob;
 use App\Models\MeetingPayment;
 use App\Models\MeetingRegistration;
 use App\Models\SiteSetting;
+use App\Services\LiveUsdRwfRateService;
 use App\Services\Mopay\MopayGatewayClient;
 use App\Support\FrontendUrl;
 use Illuminate\Support\Facades\Log;
@@ -35,19 +36,24 @@ class MeetingBookingPaymentService
         return $this->stripe ?? app(StripePaymentService::class);
     }
 
-    /** @return array{required:bool,fee_usd:float,fee_rwf:int,stripe_configured:bool,mopay_configured:bool,receiver:?array} */
+    /** @return array{required:bool,fee_usd:float,fee_rwf:int,usd_rwf_rate:float,forex_source:string,forex_as_of:?string,forex_live:bool,stripe_configured:bool,mopay_configured:bool,receiver:?array} */
     public function publicConfig(): array
     {
         $settings = SiteSetting::current();
         $required = $this->paymentRequired($settings);
         $feeUsd = $this->feeUsd($settings);
-        $feeRwf = $this->feeRwf($settings);
+        $quote = $this->forex()->quote();
+        $feeRwf = $this->feeRwf($settings, $quote);
         $receiver = app(PaymentReceiverService::class)->resolve(null);
 
         return [
             'required' => $required,
             'fee_usd' => $feeUsd,
             'fee_rwf' => $feeRwf,
+            'usd_rwf_rate' => $quote['rate'],
+            'forex_source' => $quote['source'],
+            'forex_as_of' => $quote['as_of'],
+            'forex_live' => $quote['live'],
             'stripe_configured' => $this->stripeService()->isConfigured(),
             'mopay_configured' => $this->mopay()->isConfigured() && !empty($receiver['receiver_account_no']),
             'receiver' => [
@@ -55,6 +61,11 @@ class MeetingBookingPaymentService
                 'momo_receiver_name' => $receiver['momo_receiver_name'] ?? '',
             ],
         ];
+    }
+
+    private function forex(): LiveUsdRwfRateService
+    {
+        return app(LiveUsdRwfRateService::class);
     }
 
     public function paymentRequired(?SiteSetting $settings = null): bool
@@ -77,14 +88,15 @@ class MeetingBookingPaymentService
         return max(0, (float) config('services.meeting_booking.fee_usd', 10));
     }
 
-    public function feeRwf(?SiteSetting $settings = null): int
+    public function feeRwf(?SiteSetting $settings = null, ?array $quote = null): int
     {
-        $settings = $settings ?? SiteSetting::current();
-        if (Schema::hasColumn('site_settings', 'meeting_fee_rwf') && $settings->meeting_fee_rwf !== null) {
-            return max(0, (int) $settings->meeting_fee_rwf);
+        $usd = $this->feeUsd($settings);
+        if ($usd <= 0) {
+            return 0;
         }
+        $rate = (float) (($quote['rate'] ?? 0) ?: $this->forex()->quote()['rate']);
 
-        return max(0, (int) config('services.meeting_booking.fee_rwf', 10000));
+        return max(1, (int) round($usd * $rate));
     }
 
     public function registrationIsPaid(MeetingRegistration $registration): bool
@@ -296,7 +308,7 @@ class MeetingBookingPaymentService
             return [
                 'ok' => false,
                 'status' => 422,
-                'message' => 'Meeting booking fee (RWF) is not configured. Set it under Settings → Payments.',
+                'message' => 'Meeting booking fee could not be converted to RWF. Try again in a moment.',
             ];
         }
 

@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Services\DatabaseSchemaService;
 use App\Services\InstitutionMailResolver;
 use App\Services\MailDeliveryService;
+use App\Services\LiveUsdRwfRateService;
 use App\Services\StripePaymentService;
 use App\Services\Meetings\MeetingProviderManager;
 use App\Services\Meetings\MeetingProviderStatusService;
@@ -26,6 +27,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(MailDeliveryService::class);
         $this->app->singleton(InstitutionMailResolver::class);
         $this->app->singleton(StripePaymentService::class);
+        $this->app->singleton(LiveUsdRwfRateService::class);
         $this->app->singleton(DailyApiService::class);
         $this->app->singleton(DailyWebhookSignatureVerifier::class);
         $this->app->singleton(DailyWebhookEventDispatcher::class);

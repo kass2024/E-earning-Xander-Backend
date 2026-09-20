@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\LiveUsdRwfRateService;
 use Illuminate\Database\Eloquent\Model;
 
 class SiteSetting extends Model
@@ -137,23 +138,29 @@ class SiteSetting extends Model
     {
         $digits = $this->resolvedMomoReceiverPhone();
 
+        $usd = (float) config('services.meeting_booking.fee_usd', 10);
+        if (\Illuminate\Support\Facades\Schema::hasColumn('site_settings', 'meeting_fee_usd') && $this->meeting_fee_usd !== null) {
+            $usd = (float) $this->meeting_fee_usd;
+        }
+        $forex = app(LiveUsdRwfRateService::class);
+        $quote = $forex->quote();
+        $rwf = $forex->convertUsdToRwf($usd);
+
         $payload = [
             'momo_receiver_phone' => $this->momo_receiver_phone ?: ($digits !== '' ? $this->formatDisplayPhone($digits) : ''),
             'momo_receiver_name' => $this->resolvedMomoReceiverName(),
             'momo_whatsapp_phone' => $this->momo_whatsapp_phone ?: $this->resolvedMomoWhatsappPhone(),
             'display_momo_phone' => $digits !== '' ? $this->formatDisplayPhone($digits) : '',
             'display_whatsapp_phone' => $this->resolvedMomoWhatsappPhone(),
-            'meeting_fee_usd' => (float) config('services.meeting_booking.fee_usd', 10),
-            'meeting_fee_rwf' => (int) config('services.meeting_booking.fee_rwf', 10000),
+            'meeting_fee_usd' => $usd,
+            'meeting_fee_rwf' => $rwf,
+            'usd_rwf_rate' => $quote['rate'],
+            'forex_source' => $quote['source'],
+            'forex_as_of' => $quote['as_of'],
+            'forex_live' => $quote['live'],
             'meeting_payment_required' => true,
         ];
 
-        if (\Illuminate\Support\Facades\Schema::hasColumn('site_settings', 'meeting_fee_usd') && $this->meeting_fee_usd !== null) {
-            $payload['meeting_fee_usd'] = (float) $this->meeting_fee_usd;
-        }
-        if (\Illuminate\Support\Facades\Schema::hasColumn('site_settings', 'meeting_fee_rwf') && $this->meeting_fee_rwf !== null) {
-            $payload['meeting_fee_rwf'] = (int) $this->meeting_fee_rwf;
-        }
         if (\Illuminate\Support\Facades\Schema::hasColumn('site_settings', 'meeting_payment_required')) {
             $payload['meeting_payment_required'] = (bool) ($this->meeting_payment_required ?? true);
         }
